@@ -41,8 +41,10 @@ public:
    EQModule();
    virtual ~EQModule();
    static IDrawableModule* Create() { return new EQModule(); }
+   static bool AcceptsAudio() { return true; }
+   static bool AcceptsNotes() { return false; }
+   static bool AcceptsPulses() { return false; }
 
-   
    void CreateUIControls() override;
 
    //IAudioSource
@@ -56,16 +58,20 @@ public:
    virtual void SaveLayout(ofxJSONElement& moduleInfo) override;
    virtual void SetUpFromSaveData() override;
 
-   void FloatSliderUpdated(FloatSlider* slider, float oldVal) override;
-   void DropdownUpdated(DropdownList* list, int oldVal) override;
-   void CheckboxUpdated(Checkbox* checkbox) override;
+   void FloatSliderUpdated(FloatSlider* slider, float oldVal, double time) override;
+   void DropdownUpdated(DropdownList* list, int oldVal, double time) override;
+   void CheckboxUpdated(Checkbox* checkbox, double time) override;
 
 private:
    //IDrawableModule
    void DrawModule() override;
-   void GetModuleDimensions(float& w, float& h) override { w = mWidth; h = mHeight; }
+   void GetModuleDimensions(float& w, float& h) override
+   {
+      w = mWidth;
+      h = mHeight;
+   }
    bool Enabled() const override { return mEnabled; }
-   void OnClicked(int x, int y, bool right) override;
+   void OnClicked(float x, float y, bool right) override;
    bool MouseMoved(float x, float y) override;
    void MouseReleased() override;
 
@@ -79,11 +85,11 @@ private:
    float PosForGain(float gain) { return .5f - gain / 30.0f; };
    float GainForPos(float pos) { return (.5f - pos) * 30; }
 
-   float mWidth;
-   float mHeight;
+   float mWidth{ 825 };
+   float mHeight{ 255 };
 
-   float* mWindower;
-   float* mSmoother;
+   float* mWindower{ nullptr };
+   float* mSmoother{ nullptr };
 
    ::FFT mFFT;
    FFTData mFFTData;
@@ -91,22 +97,23 @@ private:
 
    struct Filter
    {
-      bool mEnabled;
-      std::array<BiquadFilter,2> mFilter;
-      Checkbox* mEnabledCheckbox;
-      DropdownList* mTypeSelector;
-      FloatSlider* mFSlider;
-      FloatSlider* mGSlider;
-      FloatSlider* mQSlider;
-      bool mNeedToCalculateCoefficients;
+      bool mEnabled{ false };
+      std::array<BiquadFilter, 2> mFilter;
+      Checkbox* mEnabledCheckbox{ nullptr };
+      DropdownList* mTypeSelector{ nullptr };
+      FloatSlider* mFSlider{ nullptr };
+      FloatSlider* mGSlider{ nullptr };
+      FloatSlider* mQSlider{ nullptr };
+      bool mNeedToCalculateCoefficients{ true };
 
       bool UpdateCoefficientsIfNecessary();
    };
 
    std::array<Filter, 8> mFilters;
-   int mHoveredFilterHandleIndex;
-   int mDragging;
-   std::array<float, 1024> mFrequencyResponse;
-   bool mNeedToUpdateFrequencyResponseGraph;
-   float mDrawGain;
+   int mHoveredFilterHandleIndex{ -1 };
+   int mDragging{ false };
+   std::array<float, 1024> mFrequencyResponse{};
+   bool mNeedToUpdateFrequencyResponseGraph{ true };
+   float mDrawGain{ 1 };
+   bool mLiteCpuModulation{ true };
 };

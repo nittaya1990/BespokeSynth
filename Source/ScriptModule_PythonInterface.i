@@ -39,6 +39,7 @@
 #include "OSCOutput.h"
 #include "EnvelopeModulator.h"
 #include "DrumPlayer.h"
+#include "VSTPlugin.h"
 
 #include "leathers/push"
 #include "leathers/unused-value"
@@ -60,10 +61,10 @@ PYBIND11_EMBEDDED_MODULE(bespoke, m) {
    {
       return (int)ScriptModule::GetScriptMeasureTime();
    });
-   m.def("reset_transport", [](float rewind_amount)
+   m.def("reset_transport", []()
    {
       TheTransport->Reset();
-   }, "rewind_amount"_a=.001f);
+   });
    m.def("get_step", [](int subdivision)
    {
       float subdivide = subdivision * ScriptModule::GetTimeSigRatio();
@@ -141,6 +142,22 @@ PYBIND11_EMBEDDED_MODULE(bespoke, m) {
       ScriptModule::sBackgroundTextPos.set(xPos, yPos);
       ScriptModule::sBackgroundTextColor.set(red * 255, green * 255, blue * 255);
    }, "str"_a, "size"_a=50, "xPos"_a = 150, "yPos"_a = 250, "red"_a = 1, "green"_a = 1, "blue"_a = 1);
+   m.def("random", [](int seed, int index)
+   {
+      return DeterministicRandom(seed, index);
+   });
+   m.def("get_modules", []()
+   {
+      std::vector<IDrawableModule*> modules;
+      TheSynth->GetAllModules(modules);
+      std::vector<std::string> paths;
+      for (auto* module : modules)
+      {
+         if (module)
+            paths.push_back(module->Path());
+      }
+      return paths;
+   });
 }
 
 PYBIND11_EMBEDDED_MODULE(scriptmodule, m)
@@ -236,7 +253,11 @@ PYBIND11_EMBEDDED_MODULE(scriptmodule, m)
       .def("connect_osc_input", [](ScriptModule& module, int port)
       {
          module.ConnectOscInput(port);
-      });
+      })
+      .def("send_cc", [](ScriptModule& module, int control, int value, int output_index)
+      {
+         module.SendCCFromScript(control, value, output_index);
+      }, "control"_a, "value"_a, "output_index"_a = 0);
 }
 
 PYBIND11_EMBEDDED_MODULE(notesequencer, m)
@@ -250,10 +271,14 @@ PYBIND11_EMBEDDED_MODULE(notesequencer, m)
       return ret;
    }, py::return_value_policy::reference);
    py::class_<NoteStepSequencer, IDrawableModule>(m, "notesequencer")
-      .def("set_step", [](NoteStepSequencer& seq, int step, int pitch, int velocity, float length)
+      .def("set_step", [](NoteStepSequencer& seq, int step, int row, int velocity, float length)
       {
-         seq.SetStep(step, pitch, velocity, length);
-      });
+         seq.SetStep(step, row, velocity, length);
+      }, "step"_a, "row"_a, "velocity"_a = 127, "length"_a = 1.0)
+      .def("set_pitch", [](NoteStepSequencer& seq, int step, int pitch, int velocity, float length)
+      {
+         seq.SetPitch(step, pitch, velocity, length);
+      }, "step"_a, "pitch"_a, "velocity"_a = 127, "length"_a = 1.0);
 }
 
 PYBIND11_EMBEDDED_MODULE(drumsequencer, m)
@@ -358,7 +383,11 @@ PYBIND11_EMBEDDED_MODULE(notecanvas, m)
       })
       .def("clear", [](NoteCanvas& canvas)
       {
-         canvas.Clear();
+         canvas.Clear(NextBufferTime(false));
+      })
+      .def("fit", [](NoteCanvas& canvas)
+      {
+         canvas.FitNotes();
       });
 }
 
@@ -424,20 +453,27 @@ PYBIND11_EMBEDDED_MODULE(midicontroller, m)
       .value("Default", ControlType::kControlType_Default)
       .export_values();
    midiControllerClass
-      .def("set_connection", [](MidiController& midicontroller, MidiMessageType messageType, int control, std::string controlPath, ControlType controlType, int value, int channel, int page)
+      .def("set_connection", [](MidiController& midicontroller, MidiMessageType messageType, int control, std::string controlPath, ControlType controlType, int value, int channel, int page, int midi_off, int midi_on, bool scale, bool blink, float increment, bool twoway, int feedbackControl, bool isPageless)
       {
          ScriptModule::sMostRecentLineExecutedModule->SetContext();
          IUIControl* uicontrol = TheSynth->FindUIControl(controlPath.c_str());
          if (uicontrol != nullptr)
          {
-            auto* connection = midicontroller.AddControlConnection(messageType, control, channel, uicontrol);
+            auto* connection = midicontroller.AddControlConnection(messageType, control, channel, uicontrol, page);
             if (controlType != kControlType_Default)
                connection->mType = controlType;
             connection->mValue = value;
-            connection->mPage = page;
+            connection->mMidiOffValue = midi_off;
+            connection->mMidiOnValue = midi_on;
+            connection->mScaleOutput = scale;
+            connection->mBlink = blink;
+            connection->mIncrementAmount = increment;
+            connection->mTwoWay = twoway;
+            connection->mFeedbackControl = feedbackControl;
+            connection->mPageless = isPageless;
          }
          ScriptModule::sMostRecentLineExecutedModule->ClearContext();
-      }, "messageType"_a, "control"_a, "controlPath"_a, "controlType"_a = kControlType_Default, "value"_a = 0, "channel"_a = -1, "page"_a=0)
+      }, "messageType"_a, "control"_a, "controlPath"_a, "controlType"_a = kControlType_Default, "value"_a = 0, "channel"_a = -1, "page"_a=0, "midi_off"_a=0, "midi_on"_a = 127, "scale"_a = false, "blink"_a = false, "increment"_a = 0, "twoway"_a = true, "feedbackControl"_a = -1, "isPageless"_a = false)
       ///example: m.set_connection(m.Control, 32, "oscillator~pw"), or m.set_connection(m.Note, 10, "oscillator~osc", m.SetValue, 2)
       .def("send_note", [](MidiController& midicontroller, int pitch, int velocity, bool forceNoteOn, int channel, int page)
       {
@@ -459,6 +495,10 @@ PYBIND11_EMBEDDED_MODULE(midicontroller, m)
       {
          midicontroller.SendData(page, a, b, c);
       }, "a"_a, "b"_a, "c"_a, "page"_a = 0)
+      .def("send_sysex", [](MidiController& midicontroller, std::string data, int page)
+      {
+         midicontroller.SendSysEx(page, data);
+      }, "data"_a, "page"_a = 0)
       .def("add_script_listener", [](MidiController& midicontroller, ScriptModule* script)
       {
          midicontroller.AddScriptListener(script);
@@ -605,6 +645,32 @@ PYBIND11_EMBEDDED_MODULE(drumplayer, m)
       });
 }
 
+PYBIND11_EMBEDDED_MODULE(vstplugin, m)
+{
+   m.def("get", [](std::string path)
+   {
+      ScriptModule::sMostRecentLineExecutedModule->SetContext();
+      auto* ret = dynamic_cast<VSTPlugin*>(TheSynth->FindModule(path));
+      ScriptModule::sMostRecentLineExecutedModule->OnModuleReferenceBound(ret);
+      ScriptModule::sMostRecentLineExecutedModule->ClearContext();
+      return ret;
+   }, py::return_value_policy::reference);
+   py::class_<VSTPlugin, IDrawableModule> vstpluginClass(m, "vstplugin");
+   vstpluginClass
+      .def("send_cc", [](VSTPlugin& vstplugin, int ctl, int value, int channel)
+   {
+      vstplugin.SendMidi(juce::MidiMessage::controllerEvent(std::clamp(channel, 1, 16), ctl, value));
+   })
+      .def("send_program_change", [](VSTPlugin& vstplugin, int program, int channel)
+   {
+      vstplugin.SendMidi(juce::MidiMessage::programChange(std::clamp(channel, 1, 16), program));
+   })
+      .def("send_data", [](VSTPlugin& vstplugin, int a, int b, int c)
+   {
+      vstplugin.SendMidi(juce::MidiMessage(a, b, c));
+   });
+}
+
 PYBIND11_EMBEDDED_MODULE(module, m)
 {
    m.def("get", [](std::string path)
@@ -615,22 +681,78 @@ PYBIND11_EMBEDDED_MODULE(module, m)
       ScriptModule::sMostRecentLineExecutedModule->ClearContext();
       return ret;
    }, py::return_value_policy::reference);
-   m.def("create", [](std::string moduleType, int x, int y)
+   m.def("create", [](std::string moduleType, float x, float y)
    {
-      return TheSynth->SpawnModuleOnTheFly(moduleType, x, y);
+      ModuleFactory::Spawnable spawnable;
+      spawnable.mLabel = moduleType;
+      return TheSynth->SpawnModuleOnTheFly(spawnable, x, y);
    }, py::return_value_policy::reference);
    py::class_<IDrawableModule>(m, "module")
-      .def("set_position", [](IDrawableModule& module, int x, int y)
+      .def("set_position", [](IDrawableModule& module, float x, float y)
       {
          module.SetPosition(x,y);
+      })
+      .def("get_position_x", [](IDrawableModule& module)
+      {
+         return module.GetPosition().x;
+      })
+      .def("get_position_y", [](IDrawableModule& module)
+      {
+         return module.GetPosition().y;
+      })
+      .def("get_width", [](IDrawableModule& module)
+      {
+         float w, h;
+         module.GetDimensions(w, h);
+         return w;
+      })
+      .def("get_height", [](IDrawableModule& module)
+      {
+         float w, h;
+         module.GetDimensions(w, h);
+         return h;
       })
       .def("set_target", [](IDrawableModule& module, IDrawableModule* target)
       {
          module.SetTarget(target);
       })
+      .def("set_target", [](IDrawableModule& module, std::string targetPath)
+      {
+         IClickable* target = TheSynth->FindModule(targetPath);
+         if (target == nullptr)
+            target = TheSynth->FindUIControl(targetPath);
+         module.SetTarget(target);
+      })
+      .def("get_target", [](IDrawableModule& module)
+      {
+         auto* cable = module.GetPatchCableSource();
+         if (cable && cable->GetTarget())
+            return cable->GetTarget()->Path();
+         return std::string();
+      })
+      .def("get_targets", [](IDrawableModule& module)
+      {
+         std::vector<std::string> ret;
+         for (auto* source : module.GetPatchCableSources())
+         {
+            if (source == nullptr)
+               continue;
+
+            for (auto* cable : source->GetPatchCables())
+            {
+               if (cable != nullptr && cable->GetTarget() != nullptr)
+                  ret.push_back(cable->GetTarget()->Path());
+            }
+         }
+         return ret;
+      })
+      .def("set_name", [](IDrawableModule& module, std::string name)
+      {
+         module.SetName(name.c_str());
+      })
       .def("delete", [](IDrawableModule& module)
       {
-         module.GetOwningContainer()->DeleteModule(&module);
+         module.GetOwningContainer()->DeleteModule(&module, !K(fail));
       })
       .def("set", [](IDrawableModule& module, std::string path, float value)
       {
@@ -639,7 +761,7 @@ PYBIND11_EMBEDDED_MODULE(module, m)
          ScriptModule::sMostRecentLineExecutedModule->ClearContext();
          if (control != nullptr)
          {
-            control->SetValue(value);
+            control->SetValue(value, ScriptModule::sMostRecentRunTime);
          }
       })
       .def("get", [](IDrawableModule& module, std::string path)
@@ -661,7 +783,7 @@ PYBIND11_EMBEDDED_MODULE(module, m)
             float min, max;
             control->GetRange(min, max);
             float value = ofClamp(control->GetValue() + amount, min, max);
-            control->SetValue(value);
+            control->SetValue(value, ScriptModule::sMostRecentRunTime);
          }
       });
 }

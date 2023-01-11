@@ -39,8 +39,10 @@ class NoteSorter : public INoteReceiver, public INoteSource, public IDrawableMod
 public:
    NoteSorter();
    static IDrawableModule* Create() { return new NoteSorter(); }
+   static bool AcceptsAudio() { return false; }
+   static bool AcceptsNotes() { return true; }
+   static bool AcceptsPulses() { return false; }
 
-   
    void CreateUIControls() override;
 
    void PlayNote(double time, int pitch, int velocity, int voiceIdx, ModulationParameters modulation) override;
@@ -51,16 +53,21 @@ public:
    virtual void LoadLayout(const ofxJSONElement& moduleInfo) override;
    virtual void SetUpFromSaveData() override;
    virtual void SaveLayout(ofxJSONElement& moduleInfo) override;
+
 private:
    //IDrawableModule
    void DrawModule() override;
-   void GetModuleDimensions(float& width, float& height) override { width = mWidth; height = mHeight; }
+   void GetModuleDimensions(float& width, float& height) override
+   {
+      width = mWidth;
+      height = mHeight;
+   }
    bool Enabled() const override { return true; }
 
    static const int kMaxDestinations = 5;
-   int mPitch[kMaxDestinations];
-   TextEntry* mPitchEntry[kMaxDestinations];
-   AdditionalNoteCable* mDestinationCables[kMaxDestinations];
-   float mWidth;
-   float mHeight;
+   int mPitch[kMaxDestinations]{};
+   TextEntry* mPitchEntry[kMaxDestinations]{};
+   AdditionalNoteCable* mDestinationCables[kMaxDestinations]{};
+   float mWidth{ 200 };
+   float mHeight{ 20 };
 };

@@ -36,31 +36,35 @@ class ModulationVisualizer : public NoteEffectBase, public IDrawableModule
 public:
    ModulationVisualizer();
    static IDrawableModule* Create() { return new ModulationVisualizer(); }
-   
-   
-   
+   static bool AcceptsAudio() { return false; }
+   static bool AcceptsNotes() { return true; }
+   static bool AcceptsPulses() { return false; }
+
    void SetEnabled(bool enabled) override { mEnabled = enabled; }
-   
+
    //INoteReceiver
    void PlayNote(double time, int pitch, int velocity, int voiceIdx = -1, ModulationParameters modulation = ModulationParameters()) override;
-   
+
    void LoadLayout(const ofxJSONElement& moduleInfo) override;
    void SetUpFromSaveData() override;
-   
+
 private:
    //IDrawableModule
    void DrawModule() override;
-   void GetModuleDimensions(float& width, float& height) override { width = 300; height = 100; }
+   void GetModuleDimensions(float& width, float& height) override
+   {
+      width = 300;
+      height = 100;
+   }
    bool Enabled() const override { return mEnabled; }
-   
+
    struct VizVoice
    {
-      VizVoice() : mActive(false) {}
       std::string GetInfoString();
-      bool mActive;
+      bool mActive{ false };
       ModulationParameters mModulators;
    };
-   
+
    VizVoice mGlobalModulation;
    std::vector<VizVoice> mVoices;
 };

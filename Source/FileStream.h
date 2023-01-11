@@ -30,7 +30,8 @@
 #include <memory>
 #include <string>
 
-namespace juce {
+namespace juce
+{
    class FileInputStream;
    class FileOutputStream;
 }
@@ -42,7 +43,7 @@ public:
    FileStreamOut(const char*) = delete; // Hint: UTF-8 encoded std::string required
    ~FileStreamOut();
    FileStreamOut& operator<<(const int& var);
-   FileStreamOut& operator<<(const std::uint32_t &var);
+   FileStreamOut& operator<<(const std::uint32_t& var);
    FileStreamOut& operator<<(const bool& var);
    FileStreamOut& operator<<(const float& var);
    FileStreamOut& operator<<(const double& var);
@@ -50,6 +51,7 @@ public:
    FileStreamOut& operator<<(const char& var);
    void Write(const float* buffer, int size);
    void WriteGeneric(const void* buffer, int size);
+
 private:
    std::unique_ptr<juce::FileOutputStream> mStream;
 };
@@ -61,7 +63,7 @@ public:
    FileStreamIn(const char*) = delete; // Hint: UTF-8 encoded std::string required
    ~FileStreamIn();
    FileStreamIn& operator>>(int& var);
-   FileStreamIn& operator>>(std::uint32_t &var);
+   FileStreamIn& operator>>(std::uint32_t& var);
    FileStreamIn& operator>>(bool& var);
    FileStreamIn& operator>>(float& var);
    FileStreamIn& operator>>(double& var);
@@ -73,8 +75,11 @@ public:
    int GetFilePosition() const;
    bool OpenedOk() const;
    bool Eof() const;
+   static bool s32BitMode;
+   static const int sMaxStringLength = 999999; //the primary thing that might hit this limit is the json layout file (one user has had a file that exceeded a length of 100000)
+
 private:
-    std::unique_ptr<juce::FileInputStream> mStream;
+   std::unique_ptr<juce::FileInputStream> mStream;
 };
 
 #endif /* defined(__Bespoke__FileStream__) */

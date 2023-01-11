@@ -38,33 +38,38 @@ public:
    SampleBrowser();
    ~SampleBrowser();
    static IDrawableModule* Create() { return new SampleBrowser(); }
-   
-   
-   
+   static bool AcceptsAudio() { return false; }
+   static bool AcceptsNotes() { return false; }
+   static bool AcceptsPulses() { return false; }
+
    void CreateUIControls() override;
-   
-   void ButtonClicked(ClickButton* button) override;
+
+   void ButtonClicked(ClickButton* button, double time) override;
 
    virtual void LoadLayout(const ofxJSONElement& moduleInfo) override;
    virtual void SetUpFromSaveData() override;
    void SaveState(FileStreamOut& out) override;
-   void LoadState(FileStreamIn& in) override;
-   
+   void LoadState(FileStreamIn& in, int rev) override;
+   int GetModuleSaveStateRev() const override { return 0; }
+
 private:
    //IDrawableModule
    void DrawModule() override;
    bool Enabled() const override { return true; }
-   void GetModuleDimensions(float& width, float& height) override { width=300; height=38+(int)mButtons.size()*17; }
-   
+   void GetModuleDimensions(float& width, float& height) override
+   {
+      width = 300;
+      height = 38 + (int)mButtons.size() * 17;
+   }
+
    void SetDirectory(juce::String dirPath);
    int GetNumPages() const;
    void ShowPage(int page);
-   
+
    juce::String mCurrentDirectory;
    juce::StringArray mDirectoryListing;
    std::array<ClickButton*, 30> mButtons;
-   ClickButton* mBackButton;
-   ClickButton* mForwardButton;
-   int mCurrentPage;
+   ClickButton* mBackButton{ nullptr };
+   ClickButton* mForwardButton{ nullptr };
+   int mCurrentPage{ 0 };
 };
-

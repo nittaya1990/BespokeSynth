@@ -32,16 +32,6 @@
 #include "UIControlMacros.h"
 
 NoteCreator::NoteCreator()
-: mTriggerButton(nullptr)
-, mPitch(48)
-, mVelocity(1)
-, mDuration(100)
-, mPitchEntry(nullptr)
-, mVelocitySlider(nullptr)
-, mNoteOn(false)
-, mStartTime(0)
-, mNoteOnCheckbox(nullptr)
-, mVoiceIndex(-1)
 {
 }
 
@@ -59,11 +49,12 @@ void NoteCreator::CreateUIControls()
    IDrawableModule::CreateUIControls();
 
    UIBLOCK0();
-   TEXTENTRY_NUM(mPitchEntry,"pitch",4,&mPitch,0,127);
+   TEXTENTRY_NUM(mPitchEntry, "pitch", 4, &mPitch, 0, 127);
    FLOATSLIDER(mVelocitySlider, "velocity", &mVelocity, 0, 1);
    FLOATSLIDER(mDurationSlider, "duration", &mDuration, 1, 1000);
-   CHECKBOX(mNoteOnCheckbox, "on", &mNoteOn); UIBLOCK_SHIFTRIGHT();
-   BUTTON(mTriggerButton,"trigger");
+   CHECKBOX(mNoteOnCheckbox, "on", &mNoteOn);
+   UIBLOCK_SHIFTRIGHT();
+   BUTTON(mTriggerButton, "trigger");
    ENDUIBLOCK(mWidth, mHeight);
 
    mPitchEntry->DrawLabel(true);
@@ -73,7 +64,7 @@ void NoteCreator::DrawModule()
 {
    if (Minimized() || IsVisible() == false)
       return;
-   
+
    mPitchEntry->Draw();
    mNoteOnCheckbox->Draw();
    mTriggerButton->Draw();
@@ -89,21 +80,19 @@ void NoteCreator::OnPulse(double time, float velocity, int flags)
 void NoteCreator::TriggerNote(double time, float velocity)
 {
    mStartTime = time;
-   PlayNoteOutput(mStartTime, mPitch, velocity*127, mVoiceIndex);
+   PlayNoteOutput(mStartTime, mPitch, velocity * 127, mVoiceIndex);
    PlayNoteOutput(mStartTime + mDuration, mPitch, 0, mVoiceIndex);
 }
 
-void NoteCreator::CheckboxUpdated(Checkbox* checkbox)
+void NoteCreator::CheckboxUpdated(Checkbox* checkbox, double time)
 {
-   double time = gTime + gBufferSizeMs;
-
    if (checkbox == mEnabledCheckbox)
       mNoteOutput.Flush(time);
    if (checkbox == mNoteOnCheckbox)
    {
       if (mNoteOn)
       {
-         PlayNoteOutput(time, mPitch, mVelocity*127, mVoiceIndex);
+         PlayNoteOutput(time, mPitch, mVelocity * 127, mVoiceIndex);
       }
       else
       {
@@ -113,11 +102,10 @@ void NoteCreator::CheckboxUpdated(Checkbox* checkbox)
    }
 }
 
-void NoteCreator::ButtonClicked(ClickButton* button)
+void NoteCreator::ButtonClicked(ClickButton* button, double time)
 {
    if (button == mTriggerButton)
    {
-      double time = gTime + gBufferSizeMs;
       TriggerNote(time, mVelocity);
    }
 }
@@ -128,7 +116,7 @@ void NoteCreator::TextEntryComplete(TextEntry* entry)
    {
       if (mNoteOn)
       {
-         double time = gTime + gBufferSizeMs;
+         double time = NextBufferTime(false);
          mNoteOutput.Flush(time);
          PlayNoteOutput(time + .1f, mPitch, mVelocity * 127, mVoiceIndex);
       }
@@ -139,7 +127,7 @@ void NoteCreator::LoadLayout(const ofxJSONElement& moduleInfo)
 {
    mModuleSaveData.LoadString("target", moduleInfo);
    mModuleSaveData.LoadInt("voice index", moduleInfo, -1, -1, kNumVoices);
-   
+
    SetUpFromSaveData();
 }
 

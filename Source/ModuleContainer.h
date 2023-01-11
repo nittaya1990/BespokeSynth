@@ -36,9 +36,9 @@ class ModuleContainer
 {
 public:
    ModuleContainer();
-   
+
    const std::vector<IDrawableModule*>& GetModules() const { return mModules; }
-   
+
    void SetOwner(IDrawableModule* owner) { mOwner = owner; }
    IDrawableModule* GetOwner() const { return mOwner; }
    void Draw();
@@ -54,7 +54,7 @@ public:
    void SetDrawOffset(ofVec2f offset) { mDrawOffset = offset; }
    float GetDrawScale() const;
    void SetDrawScale(float scale) { mDrawScale = scale; }
-   
+
    void KeyPressed(int key, bool isRepeat);
    void KeyReleased(int key);
    void MouseMoved(float x, float y);
@@ -64,40 +64,39 @@ public:
    void MoveToFront(IDrawableModule* module);
    void AddModule(IDrawableModule* module);
    void TakeModule(IDrawableModule* module);
-   void DeleteModule(IDrawableModule* module);
+   void DeleteModule(IDrawableModule* module, bool fail = true);
    IDrawableModule* FindModule(std::string name, bool fail = true);
    IUIControl* FindUIControl(std::string path);
    bool IsHigherThan(IDrawableModule* checkFor, IDrawableModule* checkAgainst) const;
    void GetAllModules(std::vector<IDrawableModule*>& out);
-   
-   template<class T> std::vector<std::string> GetModuleNames()
+
+   template <class T>
+   std::vector<std::string> GetModuleNames()
    {
       std::vector<std::string> ret;
-      for (int i=0; i<mModules.size(); ++i)
+      for (int i = 0; i < mModules.size(); ++i)
       {
          if (dynamic_cast<T>(mModules[i]))
             ret.push_back(mModules[i]->Name());
       }
       return ret;
    }
-   
+
    void LoadModules(const ofxJSONElement& modules);
    ofxJSONElement WriteModules();
    void SaveState(FileStreamOut& out);
    void LoadState(FileStreamIn& in);
-   
+
    static constexpr int GetModuleSeparatorLength() { return 13; }
    static const char* GetModuleSeparator() { return "ryanchallinor"; }
    static bool DoesModuleHaveMoreSaveData(FileStreamIn& in);
 
-   static int sFileSaveStateRev;
-   
-private:   
+private:
    std::vector<IDrawableModule*> mModules;
-   IDrawableModule* mOwner;
+   IDrawableModule* mOwner{ nullptr };
 
    ofVec2f mDrawOffset;
-   float mDrawScale;
+   float mDrawScale{ 1 };
 };
 
-#endif  // MODULECONTAINER_H_INCLUDED
+#endif // MODULECONTAINER_H_INCLUDED

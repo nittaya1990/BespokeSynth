@@ -41,6 +41,11 @@
 
 using namespace juce;
 
+//static
+double MidiController::sLastConnectedActivityTime = -9999;
+IUIControl* MidiController::sLastActivityUIControl = nullptr;
+double MidiController::sLastBoundControlTime = -9999;
+IUIControl* MidiController::sLastBoundUIControl = nullptr;
 bool UIControlConnection::sDrawCables = true;
 
 namespace
@@ -53,66 +58,27 @@ namespace
 
 MidiController::MidiController()
 : mDevice(this)
-, mUseNegativeEdge(false)
-, mSlidersDefaultToIncremental(false)
-, mBindMode(false)
-, mBindCheckbox(nullptr)
-, mTwoWay(true)
-, mSendTwoWayOnChange(true)
-, mResendFeedbackOnRelease(false)
-, mControllerIndex(-1)
-, mLastActivityTime(-9999)
-, mLastConnectedActivityTime(-9999)
-, mLastActivityUIControl(nullptr)
-, mLastBoundControlTime(-9999)
-, mLastBoundUIControl(nullptr)
-, mBlink(false)
-, mControllerPage(0)
-, mPageSelector(nullptr)
-, mPrintInput(false)
-, mNonstandardController(nullptr)
-, mControllerList(nullptr)
-, mIsConnected(false)
-, mHasCreatedConnectionUIControls(false)
-, mReconnectWaitTimer(0)
-, mChannelFilter(ChannelFilter::kAny)
-, mVelocityMult(1)
-, mUseChannelAsVoice(false)
-, mNoteOffset(0)
-, mCurrentPitchBend(0)
-, mPitchBendRange(2)
-, mModulation(true)
-, mModwheelCC(1)  //or 74 in Multidimensional Polyphonic Expression (MPE) spec
-, mMappingDisplayMode(kHide)
-, mMappingDisplayModeSelector(nullptr)
-, mOscInPort(8000)
-, mMonomeDeviceIndex(-1)
-, mHighlightedLayoutElement(-1)
-, mHoveredLayoutElement(-1)
-, mLayoutWidth(0)
-, mLayoutHeight(0)
-, mFoundLayoutFile(false)
 {
-   mListeners.resize(MAX_MIDI_PAGES);  
+   mListeners.resize(MAX_MIDI_PAGES);
 }
 
 void MidiController::CreateUIControls()
 {
    IDrawableModule::CreateUIControls();
-   mControllerList = new DropdownList(this,"controller",3,2,&mControllerIndex, 157);
-   mMappingDisplayModeSelector = new RadioButton(this,"mappingdisplay",mControllerList,kAnchor_Below,(int*)&mMappingDisplayMode, kRadioHorizontal);
-   mBindCheckbox = new Checkbox(this,"bind (hold shift)",mMappingDisplayModeSelector,kAnchor_Below,&mBindMode);
-   mPageSelector = new DropdownList(this,"page",mBindCheckbox,kAnchor_Right,&mControllerPage);
-   mAddConnectionButton = new ClickButton(this,"add",12,300);
+   mControllerList = new DropdownList(this, "controller", 3, 2, &mControllerIndex, 157);
+   mMappingDisplayModeSelector = new RadioButton(this, "mappingdisplay", mControllerList, kAnchor_Below, (int*)&mMappingDisplayMode, kRadioHorizontal);
+   mBindCheckbox = new Checkbox(this, "bind (hold shift)", mMappingDisplayModeSelector, kAnchor_Below, &mBindMode);
+   mPageSelector = new DropdownList(this, "page", mBindCheckbox, kAnchor_Right, &mControllerPage);
+   mAddConnectionButton = new ClickButton(this, "add", 12, 300);
    mLayoutFileDropdown = new DropdownList(this, "layout", 3, 70, &mLayoutFileIndex);
    mOscInPortEntry = new TextEntry(this, "osc input port", 3, 88, 6, &mOscInPort, 0, 99999);
    mMonomeDeviceDropdown = new DropdownList(this, "monome", 3, 88, &mMonomeDeviceIndex);
-   
+
    //mDrawCablesCheckbox = new Checkbox(this,"draw cables",200,26,&UIControlConnection::sDrawCables);
-   
-   for (int i=0; i<MAX_MIDI_PAGES; ++i)
-      mPageSelector->AddLabel(("page "+ofToString(i)).c_str(), i);
-   
+
+   for (int i = 0; i < MAX_MIDI_PAGES; ++i)
+      mPageSelector->AddLabel(("page " + ofToString(i)).c_str(), i);
+
    mMappingDisplayModeSelector->AddLabel("hide", kHide);
    mMappingDisplayModeSelector->AddLabel("layout", kLayout);
    mMappingDisplayModeSelector->AddLabel("list", kList);
@@ -120,8 +86,8 @@ void MidiController::CreateUIControls()
    mLayoutFileDropdown->DrawLabel(true);
    mOscInPortEntry->DrawLabel(true);
    mMonomeDeviceDropdown->DrawLabel(true);
-   
-   mLayoutFileDropdown->AddLabel("default", 0);
+
+   mLayoutFileDropdown->AddLabel(kDefaultLayout, 0);
    File dir(ofToDataPath("controllers"));
    Array<File> files;
    for (auto file : dir.findChildFiles(File::findFiles, false, "*.json"))
@@ -135,20 +101,20 @@ MidiController::~MidiController()
 {
    TheTransport->RemoveAudioPoller(this);
    delete mNonstandardController;
-   for (auto i=mConnections.begin(); i != mConnections.end(); ++i)
+   for (auto i = mConnections.begin(); i != mConnections.end(); ++i)
       delete *i;
 }
 
 void MidiController::Init()
 {
    IDrawableModule::Init();
-   
-   for (auto i=mConnections.begin(); i != mConnections.end(); ++i)
+
+   for (auto i = mConnections.begin(); i != mConnections.end(); ++i)
       delete *i;
    mConnections.clear();
-   
+
    mHasCreatedConnectionUIControls = false;
-   for (int i=0; i<mConnectionsJson.size(); ++i)
+   for (int i = 0; i < mConnectionsJson.size(); ++i)
       AddControlConnection(mConnectionsJson[i]);
 
    TheTransport->AddAudioPoller(this);
@@ -163,20 +129,22 @@ void MidiController::AddListener(MidiDeviceListener* listener, int page)
 
 void MidiController::RemoveListener(MidiDeviceListener* listener)
 {
-   for (int i=0; i<MAX_MIDI_PAGES; ++i)
+   for (int i = 0; i < MAX_MIDI_PAGES; ++i)
       mListeners[i].remove(listener);
 }
 
-UIControlConnection* MidiController::AddControlConnection(MidiMessageType messageType, int control, int channel, IUIControl* uicontrol)
+UIControlConnection* MidiController::AddControlConnection(MidiMessageType messageType, int control, int channel, IUIControl* uicontrol, int page /*= -1*/)
 {
-   RemoveConnection(control, messageType, channel, mControllerPage);
+   if (page == -1)
+      page = mControllerPage;
+   RemoveConnection(control, messageType, channel, page);
 
    UIControlConnection* connection = new UIControlConnection(this);
    connection->mMessageType = messageType;
    connection->mControl = control;
    connection->mUIControl = uicontrol;
    connection->mChannel = channel;
-   connection->mPage = mControllerPage;
+   connection->mPage = page;
    if (dynamic_cast<Checkbox*>(uicontrol) != nullptr)
       connection->mType = kControlType_Toggle;
    else if (dynamic_cast<TextEntry*>(uicontrol) != nullptr)
@@ -189,7 +157,7 @@ UIControlConnection* MidiController::AddControlConnection(MidiMessageType messag
    int layoutControl = GetLayoutControlIndexForMidi(messageType, control);
    if (layoutControl != -1)
    {
-      connection->mIncrementAmount = mLayoutControls[layoutControl].mIncremental ? 1 : 0;
+      connection->mIncrementAmount = mLayoutControls[layoutControl].mIncrementAmount;
       connection->mMidiOffValue = mLayoutControls[layoutControl].mOffVal;
       connection->mMidiOnValue = mLayoutControls[layoutControl].mOnVal;
       connection->mScaleOutput = mLayoutControls[layoutControl].mScaleOutput;
@@ -263,6 +231,8 @@ void MidiController::AddControlConnection(const ofxJSONElement& connection)
       controlConnection->mMessageType = msgType;
       controlConnection->mControl = control;
       controlConnection->SetUIControl(path);
+      if (controlConnection->mUIControl == nullptr && controlConnection->mSpecialBinding == kSpecialBinding_None)
+         controlConnection->mShouldRetryForUIControlAt = path;
 
       ControlType controlType = kControlType_SetValue;
       if (connection["toggle"].asBool())
@@ -323,23 +293,25 @@ void MidiController::AddControlConnection(const ofxJSONElement& connection)
    }
    catch (Json::LogicError& e)
    {
+      TheSynth->LogEvent(__PRETTY_FUNCTION__ + std::string(" json error: ") + e.what(), kLogEventType_Error);
    }
 }
 
 void MidiController::OnTransportAdvanced(float amount)
 {
    PROFILER(MidiController);
-   
+
    mQueuedMessageMutex.lock();
-   
+
    double firstNoteTimestampMs = -1;
+   double lastPlayTime = -1;
    for (auto note = mQueuedNotes.begin(); note != mQueuedNotes.end(); ++note)
    {
       int voiceIdx = -1;
-      
+
       if (mUseChannelAsVoice)
          voiceIdx = note->mChannel - 1;
-      
+
       //TODO(Ryan) how can I use note->mTimestamp to get more accurate timing for midi input?
       //this here is not accurate, but prevents notes played within the same buffer from having the exact same time
       double playTime;
@@ -351,35 +323,48 @@ void MidiController::OnTransportAdvanced(float amount)
       else
       {
          playTime = gTime + (note->mTimestampMs - firstNoteTimestampMs);
+         if (playTime <= lastPlayTime)
+            playTime += .01; //hack to handle note on/off in the same frame
       }
-      PlayNoteOutput(playTime, note->mPitch + mNoteOffset, MIN(127,note->mVelocity*mVelocityMult), voiceIdx, ModulationParameters(mModulation.GetPitchBend(voiceIdx), mModulation.GetModWheel(voiceIdx), mModulation.GetPressure(voiceIdx), 0));
-      
+      lastPlayTime = playTime;
+      PlayNoteOutput(playTime, note->mPitch + mNoteOffset, MIN(127, note->mVelocity * mVelocityMult), voiceIdx, ModulationParameters(mModulation.GetPitchBend(voiceIdx), mModulation.GetModWheel(voiceIdx), mModulation.GetPressure(voiceIdx), 0));
+
       for (auto i = mListeners[mControllerPage].begin(); i != mListeners[mControllerPage].end(); ++i)
          (*i)->OnMidiNote(*note);
    }
    mQueuedNotes.clear();
-   
-   for (auto note = mQueuedControls.begin(); note != mQueuedControls.end(); ++note)
+
+   for (auto ctrl = mQueuedControls.begin(); ctrl != mQueuedControls.end(); ++ctrl)
    {
+      if (mSendCCOutput)
+      {
+         int voiceIdx = -1;
+
+         if (mUseChannelAsVoice)
+            voiceIdx = ctrl->mChannel - 1;
+
+         SendCCOutput(ctrl->mControl, ctrl->mValue, voiceIdx);
+      }
+
       for (auto i = mListeners[mControllerPage].begin(); i != mListeners[mControllerPage].end(); ++i)
-         (*i)->OnMidiControl(*note);
+         (*i)->OnMidiControl(*ctrl);
    }
    mQueuedControls.clear();
-   
+
    for (auto note = mQueuedProgramChanges.begin(); note != mQueuedProgramChanges.end(); ++note)
    {
       for (auto i = mListeners[mControllerPage].begin(); i != mListeners[mControllerPage].end(); ++i)
          (*i)->OnMidiProgramChange(*note);
    }
    mQueuedProgramChanges.clear();
-   
+
    for (auto note = mQueuedPitchBends.begin(); note != mQueuedPitchBends.end(); ++note)
    {
       for (auto i = mListeners[mControllerPage].begin(); i != mListeners[mControllerPage].end(); ++i)
          (*i)->OnMidiPitchBend(*note);
    }
    mQueuedPitchBends.clear();
-   
+
    mQueuedMessageMutex.unlock();
 }
 
@@ -393,13 +378,13 @@ void MidiController::OnMidiNote(MidiNote& note)
       int voiceIdx = note.mChannel - 1;
       mModulation.GetPitchBend(voiceIdx)->SetValue(0);
    }
-   
-   MidiReceived(kMidiMessage_Note, note.mPitch, note.mVelocity/127.0f, note.mChannel);
-   
+
+   MidiReceived(kMidiMessage_Note, note.mPitch, note.mVelocity / 127.0f, note.mVelocity, note.mChannel);
+
    mQueuedMessageMutex.lock();
    mQueuedNotes.push_back(note);
    mQueuedMessageMutex.unlock();
-   
+
    if (mPrintInput)
       ofLog() << Name() << " note: " << note.mPitch << ", " << note.mVelocity;
 }
@@ -408,12 +393,12 @@ void MidiController::OnMidiControl(MidiControl& control)
 {
    if (!mEnabled || (mChannelFilter != ChannelFilter::kAny && control.mChannel != (int)mChannelFilter))
       return;
-   
+
    int voiceIdx = -1;
-   
+
    if (mUseChannelAsVoice)
       voiceIdx = control.mChannel - 1;
-   
+
    if (control.mControl == mModwheelCC)
    {
       //if (mModwheelCC == 74) //MPE
@@ -421,13 +406,13 @@ void MidiController::OnMidiControl(MidiControl& control)
       //else
       mModulation.GetModWheel(voiceIdx)->SetValue(control.mValue / 127.0f);
    }
-   
-   MidiReceived(kMidiMessage_Control, control.mControl, control.mValue/127.0f, control.mChannel);
-   
+
+   MidiReceived(kMidiMessage_Control, control.mControl, control.mValue / 127.0f, control.mValue, control.mChannel);
+
    mQueuedMessageMutex.lock();
    mQueuedControls.push_back(control);
    mQueuedMessageMutex.unlock();
-   
+
    if (mPrintInput)
       ofLog() << Name() << " control: " << control.mControl << ", " << control.mValue;
 }
@@ -436,14 +421,14 @@ void MidiController::OnMidiPressure(MidiPressure& pressure)
 {
    if (!mEnabled || (mChannelFilter != ChannelFilter::kAny && pressure.mChannel != (int)mChannelFilter))
       return;
-   
+
    int voiceIdx = -1;
-   
+
    if (mUseChannelAsVoice)
       voiceIdx = pressure.mChannel - 1;
-   
+
    mModulation.GetPressure(voiceIdx)->SetValue(pressure.mPressure / 127.0f);
-   
+
    mNoteOutput.SendPressure(pressure.mPitch, pressure.mPressure);
 }
 
@@ -451,13 +436,13 @@ void MidiController::OnMidiProgramChange(MidiProgramChange& program)
 {
    if (!mEnabled || (mChannelFilter != ChannelFilter::kAny && program.mChannel != (int)mChannelFilter))
       return;
-   
-   MidiReceived(kMidiMessage_Program, program.mProgram, 1, program.mChannel);
-   
+
+   MidiReceived(kMidiMessage_Program, program.mProgram, 1, 1, program.mChannel);
+
    mQueuedMessageMutex.lock();
    mQueuedProgramChanges.push_back(program);
    mQueuedMessageMutex.unlock();
-   
+
    if (mPrintInput)
       ofLog() << Name() << " program change: " << program.mProgram;
 }
@@ -466,24 +451,24 @@ void MidiController::OnMidiPitchBend(MidiPitchBend& pitchBend)
 {
    if (!mEnabled || (mChannelFilter != ChannelFilter::kAny && pitchBend.mChannel != (int)mChannelFilter))
       return;
-   
+
    int voiceIdx = -1;
-   
-   float amount = (pitchBend.mValue - 8192.0f) / (8192.0f/mPitchBendRange);
-   
+
+   float amount = (pitchBend.mValue - 8192.0f) / (8192.0f / mPitchBendRange);
+
    if (mUseChannelAsVoice)
       voiceIdx = pitchBend.mChannel - 1;
    else
       mCurrentPitchBend = amount;
-   
+
    mModulation.GetPitchBend(voiceIdx)->SetValue(amount);
-   
-   MidiReceived(kMidiMessage_PitchBend, MIDI_PITCH_BEND_CONTROL_NUM, pitchBend.mValue/16383.0f, pitchBend.mChannel);   //16383 = max pitch bend
- 
+
+   MidiReceived(kMidiMessage_PitchBend, MIDI_PITCH_BEND_CONTROL_NUM, pitchBend.mValue / 16383.0f, pitchBend.mValue, pitchBend.mChannel); //16383 = max pitch bend
+
    mQueuedMessageMutex.lock();
    mQueuedPitchBends.push_back(pitchBend);
    mQueuedMessageMutex.unlock();
-   
+
    if (mPrintInput)
       ofLog() << Name() << " pitch bend: " << pitchBend.mValue;
 }
@@ -495,20 +480,20 @@ void MidiController::OnMidi(const MidiMessage& message)
    mNoteOutput.SendMidi(message);
 }
 
-void MidiController::MidiReceived(MidiMessageType messageType, int control, float value, int channel)
+void MidiController::MidiReceived(MidiMessageType messageType, int control, float value, int rawValue, int channel)
 {
    assert(mEnabled);
-   
+
    mLastActivityBound = false;
    //if (value > 0)
-      mLastActivityTime = gTime;
-   
+   mLastActivityTime = gTime;
+
    GetLayoutControl(control, messageType).mLastActivityTime = gTime;
    GetLayoutControl(control, messageType).mLastValue = value;
-   
-   if (JustBoundControl())   //no midi messages if we just bound something, to avoid changing that thing we just bound
+
+   if (JustBoundControl()) //no midi messages if we just bound something, to avoid changing that thing we just bound
       return;
-   
+
    if (messageType == kMidiMessage_Control)
       mLastInput = "cc ";
    if (messageType == kMidiMessage_Note)
@@ -517,18 +502,18 @@ void MidiController::MidiReceived(MidiMessageType messageType, int control, floa
       mLastInput = "program change ";
    if (messageType == kMidiMessage_PitchBend)
       mLastInput = "pitchbend";
-   
+
    if (messageType != kMidiMessage_PitchBend)
       mLastInput += ofToString(control);
-   
-   mLastInput += ", value: " + ofToString(value,2) + ", channel: " + ofToString(channel);
+
+   mLastInput += ", value: " + ofToString(value, 2) + " (" + ofToString(rawValue) + "), channel: " + ofToString(channel);
 
    if (mBindMode && gBindToUIControl)
    {
       AddControlConnection(messageType, control, channel, gBindToUIControl);
-      mLastBoundControlTime = gTime;
-      mLastBoundUIControl = gBindToUIControl;
-      mLastBoundUIControl->StartBeacon();
+      sLastBoundControlTime = gTime;
+      sLastBoundUIControl = gBindToUIControl;
+      sLastBoundUIControl->StartBeacon();
       gBindToUIControl = nullptr;
       return;
    }
@@ -536,9 +521,9 @@ void MidiController::MidiReceived(MidiMessageType messageType, int control, floa
    if (Push2Control::sBindToUIControl)
    {
       AddControlConnection(messageType, control, channel, Push2Control::sBindToUIControl);
-      mLastBoundControlTime = gTime;
-      mLastBoundUIControl = Push2Control::sBindToUIControl;
-      mLastBoundUIControl->StartBeacon();
+      sLastBoundControlTime = gTime;
+      sLastBoundUIControl = Push2Control::sBindToUIControl;
+      sLastBoundUIControl->StartBeacon();
       Push2Control::sBindToUIControl = nullptr;
       return;
    }
@@ -546,13 +531,13 @@ void MidiController::MidiReceived(MidiMessageType messageType, int control, floa
    if (mBindMode && gHoveredUIControl && (GetKeyModifiers() == kModifier_Shift))
    {
       AddControlConnection(messageType, control, channel, gHoveredUIControl);
-      mLastBoundControlTime = gTime;
-      mLastBoundUIControl = gHoveredUIControl;
-      mLastBoundUIControl->StartBeacon();
+      sLastBoundControlTime = gTime;
+      sLastBoundUIControl = gHoveredUIControl;
+      sLastBoundUIControl->StartBeacon();
       return;
    }
 
-   for (auto i=mConnections.begin(); i != mConnections.end(); ++i)
+   for (auto i = mConnections.begin(); i != mConnections.end(); ++i)
    {
       UIControlConnection* connection = *i;
       if (connection->mMessageType == messageType &&
@@ -562,14 +547,17 @@ void MidiController::MidiReceived(MidiMessageType messageType, int control, floa
       {
          mLastActivityBound = true;
          //if (value > 0)
-            connection->mLastActivityTime = gTime;
-         
+         connection->mLastActivityTime = gTime;
+
          IUIControl* uicontrol = connection->GetUIControl();
          if (uicontrol == nullptr)
             continue;
-         
-         mLastActivityUIControl = uicontrol;
-         mLastConnectedActivityTime = gTime;
+
+         if (mShowActivityUIOverlay)
+         {
+            sLastActivityUIControl = uicontrol;
+            sLastConnectedActivityTime = gTime;
+         }
 
          if (connection->mType == kControlType_Slider)
          {
@@ -582,20 +570,20 @@ void MidiController::MidiReceived(MidiMessageType messageType, int control, floa
                const float midpoint = 64.0f / 127.0f;
                if (value != midpoint)
                {
-                   if (value > midpoint)
-                      curValue += increment;
-                   else
-                      curValue -= increment;
-                   uicontrol->SetFromMidiCC(curValue);
+                  float change = (value - midpoint) * 127;
+                  float sign = change > 0 ? 1 : -1;
+                  change = sign * sqrtf(fabsf(change)); //make response fall off for bigger changes
+                  curValue += increment * change;
+                  uicontrol->SetFromMidiCC(curValue, NextBufferTime(false), false);
                }
             }
             else
             {
                if (connection->mMessageType == kMidiMessage_Note)
-                  value = value>0 ? 1 : 0;
+                  value = value > 0 ? 1 : 0;
                if (connection->mScaleOutput && (connection->mMidiOffValue != 0 || connection->mMidiOnValue != 127))
-                  value = ofLerp(connection->mMidiOffValue/127.0f, connection->mMidiOnValue/127.0f, value);
-               uicontrol->SetFromMidiCC(value);
+                  value = ofLerp(connection->mMidiOffValue / 127.0f, connection->mMidiOnValue / 127.0f, value);
+               uicontrol->SetFromMidiCC(value, NextBufferTime(false), false);
             }
             uicontrol->StartBeacon();
          }
@@ -604,7 +592,7 @@ void MidiController::MidiReceived(MidiMessageType messageType, int control, floa
             if (value > 0)
             {
                float val = uicontrol->GetMidiValue();
-               uicontrol->SetValue(val == 0);
+               uicontrol->SetValue(val == 0, NextBufferTime(false));
                uicontrol->StartBeacon();
             }
          }
@@ -615,7 +603,7 @@ void MidiController::MidiReceived(MidiMessageType messageType, int control, floa
                if (connection->mIncrementAmount != 0)
                   uicontrol->Increment(connection->mIncrementAmount);
                else
-                  uicontrol->SetValue(connection->mValue);
+                  uicontrol->SetValue(connection->mValue, NextBufferTime(false));
                uicontrol->StartBeacon();
             }
          }
@@ -626,29 +614,29 @@ void MidiController::MidiReceived(MidiMessageType messageType, int control, floa
                if (connection->mIncrementAmount != 0)
                   uicontrol->Increment(connection->mIncrementAmount);
                else
-                  uicontrol->SetValue(connection->mValue);
+                  uicontrol->SetValue(connection->mValue, NextBufferTime(false));
                uicontrol->StartBeacon();
             }
          }
          else if (connection->mType == kControlType_Direct)
          {
-            uicontrol->SetValue(value*127);
+            uicontrol->SetValue(value * 127, NextBufferTime(false));
             uicontrol->StartBeacon();
          }
 
          if (!mSendTwoWayOnChange)
-            connection->mLastControlValue = int(uicontrol->GetMidiValue() * 127);   //set expected value here, so we don't send the value. otherwise, this will send the input value right back as output. (although, this behavior is desirable for some controllers, hence mSendTwoWayOnChange)
+            connection->mLastControlValue = int(uicontrol->GetMidiValue() * 127); //set expected value here, so we don't send the value. otherwise, this will send the input value right back as output. (although, this behavior is desirable for some controllers, hence mSendTwoWayOnChange)
 
          if (mResendFeedbackOnRelease && value == 0)
-            connection->mLastControlValue = -999;  //force feedback update on release
+            connection->mLastControlValue = -999; //force feedback update on release
       }
    }
-   
+
    for (auto* grid : mGrids)
    {
       if (grid->mType == messageType && grid->mGridControlTarget[mControllerPage] != nullptr && grid->mGridControlTarget[mControllerPage]->GetGridController() != nullptr)
       {
-         for (int i=0; i<grid->mControls.size(); ++i)
+         for (int i = 0; i < grid->mControls.size(); ++i)
          {
             if (grid->mControls[i] == control)
             {
@@ -659,7 +647,7 @@ void MidiController::MidiReceived(MidiMessageType messageType, int control, floa
          }
       }
    }
-   
+
    /*if (mLastActivityBound == false && mTwoWay) //if this didn't affect anything, give that feedback on the controller by keeping it at zero
    {
       //if (messageType == kMidiMessage_Note)
@@ -675,14 +663,14 @@ void MidiController::MidiReceived(MidiMessageType messageType, int control, floa
 void MidiController::AddScriptListener(ScriptModule* script)
 {
    if (!VectorContains(script, mScriptListeners))
-      mScriptListeners.push_back(script); 
+      mScriptListeners.push_back(script);
 }
 
 void MidiController::RemoveConnection(int control, MidiMessageType messageType, int channel, int page)
 {
    IUIControl* removed = nullptr;
-   
-   for (auto i=mConnections.begin(); i != mConnections.end(); ++i)
+
+   for (auto i = mConnections.begin(); i != mConnections.end(); ++i)
    {
       if ((*i)->mControl == control && (*i)->mMessageType == messageType && (*i)->mChannel == channel && ((*i)->mPage == page || (*i)->mPageless))
       {
@@ -696,7 +684,7 @@ void MidiController::RemoveConnection(int control, MidiMessageType messageType, 
    if (removed)
    {
       bool remotelyControlled = false;
-      for (auto i=mConnections.begin(); i != mConnections.end(); ++i)
+      for (auto i = mConnections.begin(); i != mConnections.end(); ++i)
       {
          if ((*i)->mUIControl == removed)
          {
@@ -714,7 +702,7 @@ void MidiController::Poll()
 {
    bool lastBlink = mBlink;
    mBlink = int(TheTransport->GetMeasurePos(gTime) * TheTransport->GetTimeSigTop() * 2) % 2 == 0;
-   
+
    if (IsInputConnected(!K(immediate)) || mReconnectWaitTimer > 0)
    {
       if (!mIsConnected && gTime - mInitialConnectionTime > 1000)
@@ -743,7 +731,7 @@ void MidiController::Poll()
             }
             else
             {
-               mReconnectWaitTimer -= 1/(ofGetFrameRate()) * 1000;
+               mReconnectWaitTimer -= 1 / (ofGetFrameRate()) * 1000;
                if (mReconnectWaitTimer <= 0)
                   ConnectDevice();
             }
@@ -765,41 +753,41 @@ void MidiController::Poll()
          mIsConnected = false;
       }
    }
-   
+
    if (mTwoWay)
    {
-      for (auto i=mConnections.begin(); i != mConnections.end(); ++i)
+      for (auto i = mConnections.begin(); i != mConnections.end(); ++i)
       {
          UIControlConnection* connection = *i;
-         
+
          if (connection->mTwoWay == false)
             continue;
-         
+
          IUIControl* uicontrol = connection->GetUIControl();
          if (uicontrol == nullptr)
             continue;
 
-         if (JustBoundControl() && uicontrol == mLastBoundUIControl)
+         if (JustBoundControl() && uicontrol == sLastBoundUIControl)
             continue;
-         
+
          if (!connection->mPageless && connection->mPage != mControllerPage)
             continue;
-         
+
          int control = connection->mControl;
          int messageType = connection->mMessageType;
-         
+
          if (connection->mFeedbackControl != -1) // "self"
          {
-            control = connection->mFeedbackControl%128;
+            control = connection->mFeedbackControl % 128;
             if (connection->mFeedbackControl < 128)
                messageType = kMidiMessage_Control;
             else
                messageType = kMidiMessage_Note;
          }
-         
+
          if (connection->mFeedbackControl == -2) // "none"
             continue;
-         
+
          int curValue = int(uicontrol->GetMidiValue() * 127);
          if (curValue != connection->mLastControlValue ||
              (connection->mBlink && lastBlink != mBlink))
@@ -878,9 +866,13 @@ void MidiController::Poll()
          }
       }
    }
-   
+
    if (mNonstandardController != nullptr)
       mNonstandardController->Poll();
+
+   auto connections = mConnections;
+   for (auto* connection : connections)
+      connection->Poll();
 }
 
 void MidiController::Exit()
@@ -902,26 +894,26 @@ void MidiController::DrawModule()
    {
       ofPushStyle();
       if (mLastActivityBound)
-         ofSetColor(0,255,0,255*(1-(gTime - mLastActivityTime)/200));
+         ofSetColor(0, 255, 0, 255 * (1 - (gTime - mLastActivityTime) / 200));
       else
-         ofSetColor(255,0,0,255*(1-(gTime - mLastActivityTime)/200));
+         ofSetColor(255, 0, 0, 255 * (1 - (gTime - mLastActivityTime) / 200));
       ofFill();
-      ofRect(30+gFont.GetStringWidth(Name(), 15),-11,10,10);
+      ofRect(30 + gFont.GetStringWidth(Name(), 15), -11, 10, 10);
       ofPopStyle();
    }
-   
+
    if (!mIsConnected)
    {
-      float xStart = 30+gFont.GetStringWidth(Name(), 15);
+      float xStart = 30 + gFont.GetStringWidth(Name(), 15);
       float yStart = -11;
-      
+
       ofPushStyle();
       ofSetColor(ofColor::red);
-      ofLine(xStart,yStart,xStart+10,yStart+10);
-      ofLine(xStart+10,yStart,xStart,yStart+10);
+      ofLine(xStart, yStart, xStart + 10, yStart + 10);
+      ofLine(xStart + 10, yStart, xStart, yStart + 10);
       ofPopStyle();
    }
-   
+
    if (TheSynth->GetLastClickedModule() == this)
    {
       for (auto i = mListeners[mControllerPage].begin(); i != mListeners[mControllerPage].end(); ++i)
@@ -930,10 +922,10 @@ void MidiController::DrawModule()
 
    if (Minimized() || IsVisible() == false)
       return;
-   
+
    if (!mHasCreatedConnectionUIControls)
    {
-      int i=0;
+      int i = 0;
       for (UIControlConnection* connection : mConnections)
       {
          connection->CreateUIControls(i);
@@ -941,7 +933,7 @@ void MidiController::DrawModule()
       }
       mHasCreatedConnectionUIControls = true;
    }
-   
+
    mControllerList->Draw();
    mMappingDisplayModeSelector->Draw();
    mBindCheckbox->Draw();
@@ -953,8 +945,8 @@ void MidiController::DrawModule()
    mOscInPortEntry->Draw();
    mMonomeDeviceDropdown->SetShowing(mDeviceIn == "monome" && mMappingDisplayMode == kLayout);
    mMonomeDeviceDropdown->Draw();
-   
-   for (int i=0; i<NUM_LAYOUT_CONTROLS; ++i)
+
+   for (int i = 0; i < NUM_LAYOUT_CONTROLS; ++i)
    {
       if (mLayoutControls[i].mControlCable)
          mLayoutControls[i].mControlCable->SetEnabled(false);
@@ -964,37 +956,37 @@ void MidiController::DrawModule()
       if (grid->mGridCable)
          grid->mGridCable->SetEnabled(mMappingDisplayMode == kLayout);
    }
-   
+
    if (mMappingDisplayMode == kHide)
    {
       for (auto iter = mConnections.begin(); iter != mConnections.end(); ++iter)
       {
          UIControlConnection* connection = *iter;
-         connection->SetShowing(false);   //set all to not be showing
+         connection->SetShowing(false); //set all to not be showing
       }
    }
    else
    {
-      float w,h;
+      float w, h;
       GetDimensions(w, h);
-      
-      DrawTextNormal("last input: "+mLastInput,60,h-5);
-      
+
+      DrawTextNormal("last input: " + mLastInput, 60, h - 5);
+
       if (gTime - mLastActivityTime > 0 && gTime - mLastActivityTime < 200)
       {
          ofPushStyle();
          if (mLastActivityBound)
-            ofSetColor(0,255,0,255*(1-(gTime - mLastActivityTime)/200));
+            ofSetColor(0, 255, 0, 255 * (1 - (gTime - mLastActivityTime) / 200));
          else
-            ofSetColor(255,0,0,255*(1-(gTime - mLastActivityTime)/200));
+            ofSetColor(255, 0, 0, 255 * (1 - (gTime - mLastActivityTime) / 200));
          ofFill();
-         ofRect(48,h-14,10,10);
+         ofRect(48, h - 14, 10, 10);
          ofPopStyle();
       }
-      
+
       mPageSelector->SetShowing(true);
    }
-   
+
    if (mMappingDisplayMode == kLayout)
    {
       ofPushStyle();
@@ -1014,23 +1006,23 @@ void MidiController::DrawModule()
          DrawTextNormal("not connected", 3, 63);
       }
       ofPopStyle();
-      
+
       ofPushStyle();
       ofNoFill();
-      for (int i=0; i<NUM_LAYOUT_CONTROLS; ++i)
+      for (int i = 0; i < NUM_LAYOUT_CONTROLS; ++i)
       {
          ControlLayoutElement& control = mLayoutControls[i];
          if (control.mActive)
          {
-            ofVec2f center(control.mPosition.x + control.mDimensions.x/2, control.mPosition.y + control.mDimensions.y/2);
+            ofVec2f center(control.mPosition.x + control.mDimensions.x / 2, control.mPosition.y + control.mDimensions.y / 2);
             float uiControlValue = 0;
-            
+
             if (control.mControlCable)
             {
                control.mControlCable->SetEnabled(UIControlConnection::sDrawCables);
                control.mControlCable->SetManualPosition(center.x, center.y);
                control.mControlCable->SetPatchCableDrawMode(kPatchCableDrawMode_SourceOnHoverOnly);
-               
+
                UIControlConnection* connection = GetConnectionForControl(control.mType, control.mControl);
                if (connection)
                {
@@ -1047,21 +1039,21 @@ void MidiController::DrawModule()
                      control.mControlCable->ClearPatchCables();
                }
             }
-            
+
             if (gTime - control.mLastActivityTime < 200)
             {
                ofPushStyle();
                if (control.mControlCable && control.mControlCable->GetTarget())
-                  ofSetColor(0,255,0,255*(1-(gTime - control.mLastActivityTime)/200));
+                  ofSetColor(0, 255, 0, 255 * (1 - (gTime - control.mLastActivityTime) / 200));
                else
-                  ofSetColor(255,0,0,255*(1-(gTime - control.mLastActivityTime)/200));
+                  ofSetColor(255, 0, 0, 255 * (1 - (gTime - control.mLastActivityTime) / 200));
                ofFill();
-               ofRect(control.mPosition.x,control.mPosition.y,5,5);
+               ofRect(control.mPosition.x, control.mPosition.y, 5, 5);
                ofPopStyle();
             }
-            
+
             ofPushStyle();
-            
+
             if (mHighlightedLayoutElement == i)
             {
                ofSetColor(255, 255, 255, gModuleDrawAlpha);
@@ -1069,15 +1061,15 @@ void MidiController::DrawModule()
             else
             {
                if (control.mLastActivityTime > 0)
-                  ofSetColor(IDrawableModule::GetColor(GetModuleType()), gModuleDrawAlpha);
+                  ofSetColor(IDrawableModule::GetColor(GetModuleCategory()), gModuleDrawAlpha);
                else
-                  ofSetColor(IDrawableModule::GetColor(GetModuleType()), gModuleDrawAlpha * .3f);
+                  ofSetColor(IDrawableModule::GetColor(GetModuleCategory()), gModuleDrawAlpha * .3f);
             }
-            
+
             if (control.mDrawType == kDrawType_Button)
             {
                ofRect(control.mPosition.x, control.mPosition.y, control.mDimensions.x, control.mDimensions.y, 4);
-               
+
                bool on = control.mLastValue > 0;
                if (control.mType == kMidiMessage_Program)
                   on = control.mLastValue > 0 && (gTime - control.mLastActivityTime < 250);
@@ -1092,65 +1084,65 @@ void MidiController::DrawModule()
                   ofPopStyle();
                }
             }
-            
+
             if (control.mDrawType == kDrawType_Knob)
             {
                float value = control.mLastValue;
-               if (control.mIncremental)
+               if (control.mIncrementAmount != 0)
                   value = uiControlValue;
-               
-               ofCircle(center.x, center.y, control.mDimensions.x/2);
+
+               ofCircle(center.x, center.y, control.mDimensions.x / 2);
                ofPushStyle();
                ofSetColor(255, 255, 255, gModuleDrawAlpha);
                float angle = ofLerp(.1f, .9f, value) * FTWO_PI;
-               ofLine(center.x, center.y, center.x - sinf(angle) * control.mDimensions.x/2, center.y + cosf(angle) * control.mDimensions.x/2);
+               ofLine(center.x, center.y, center.x - sinf(angle) * control.mDimensions.x / 2, center.y + cosf(angle) * control.mDimensions.x / 2);
                ofPopStyle();
             }
-               
+
             if (control.mDrawType == kDrawType_Slider)
             {
                float value = control.mLastValue;
-               if (control.mIncremental)
+               if (control.mIncrementAmount != 0)
                   value = uiControlValue;
-               
+
                ofRect(control.mPosition.x, control.mPosition.y, control.mDimensions.x, control.mDimensions.y, 0);
                ofPushStyle();
                ofSetColor(255, 255, 255, gModuleDrawAlpha);
                ofFill();
                if (control.mDimensions.x > control.mDimensions.y)
-                  ofLine(control.mPosition.x+value*control.mDimensions.x,
+                  ofLine(control.mPosition.x + value * control.mDimensions.x,
                          control.mPosition.y,
-                         control.mPosition.x+value*control.mDimensions.x,
-                         control.mPosition.y+control.mDimensions.y);
+                         control.mPosition.x + value * control.mDimensions.x,
+                         control.mPosition.y + control.mDimensions.y);
                else
                   ofLine(control.mPosition.x,
-                         control.mPosition.y+(1-value)*control.mDimensions.y,
-                         control.mPosition.x+control.mDimensions.x,
-                         control.mPosition.y+(1-value)*control.mDimensions.y);
+                         control.mPosition.y + (1 - value) * control.mDimensions.y,
+                         control.mPosition.x + control.mDimensions.x,
+                         control.mPosition.y + (1 - value) * control.mDimensions.y);
                ofPopStyle();
             }
-            
+
             ofPopStyle();
          }
       }
-      
+
       for (auto* grid : mGrids)
          ofRect(grid->mPosition.x, grid->mPosition.y, grid->mDimensions.x, grid->mDimensions.y);
-      
+
       ofPopStyle();
-      
+
       for (auto connection : mConnections)
-         connection->SetShowing(false);   //set all to not be showing
-      
+         connection->SetShowing(false); //set all to not be showing
+
       ofPushStyle();
       ofFill();
-      ofSetColor(50,50,50,gModuleDrawAlpha*.5f);
-      ofRect(kLayoutControlsX,kLayoutControlsY,235,140);
+      ofSetColor(50, 50, 50, gModuleDrawAlpha * .5f);
+      ofRect(kLayoutControlsX, kLayoutControlsY, 235, 140);
       ofPopStyle();
-      
-      if (!mFoundLayoutFile)
-         gFont.DrawStringWrap("couldn't load layout file at "+mLastLoadedLayoutFile+", using the default layout instead", 15, 3, kLayoutControlsY + 160, 235);
-      
+
+      if (mLayoutLoadError != "")
+         gFont.DrawStringWrap(mLayoutLoadError, 15, 3, kLayoutControlsY + 160, 235);
+
       if (mHighlightedLayoutElement != -1)
       {
          UIControlConnection* connection = GetConnectionForControl(mLayoutControls[mHighlightedLayoutElement].mType, mLayoutControls[mHighlightedLayoutElement].mControl);
@@ -1158,7 +1150,7 @@ void MidiController::DrawModule()
             connection->DrawLayout();
       }
    }
-   
+
    if (mMappingDisplayMode == kList)
    {
       ofPushStyle();
@@ -1173,21 +1165,21 @@ void MidiController::DrawModule()
          DrawTextNormal("not connected", 165, 13);
       }
       ofPopStyle();
-      
-      float w,h;
+
+      float w, h;
       GetDimensions(w, h);
-      mAddConnectionButton->SetPosition(mAddConnectionButton->GetPosition(true).x, h-17);
+      mAddConnectionButton->SetPosition(mAddConnectionButton->GetPosition(true).x, h - 17);
       mAddConnectionButton->Draw();
-      
+
       //DrawTextNormal("                                                                                                                                                                MIDI out                           all", 12, 34);
       //DrawTextNormal("midi       num   chan    path                                                           type       value        inc        feedback    off    on    blink  pages", 12, 46);
-      
+
       std::list<UIControlConnection*> toDraw;
       //draw pageless ones first
       for (auto iter = mConnections.begin(); iter != mConnections.end(); ++iter)
       {
          UIControlConnection* connection = *iter;
-         connection->SetShowing(false);   //set all to not be showing
+         connection->SetShowing(false); //set all to not be showing
          if (connection->mPageless)
          {
             toDraw.push_back(connection);
@@ -1202,8 +1194,8 @@ void MidiController::DrawModule()
             toDraw.push_back(connection);
          }
       }
-      
-      int i=0;
+
+      int i = 0;
       for (auto iter = toDraw.begin(); iter != toDraw.end();)
       {
          UIControlConnection* connection = *iter;
@@ -1217,7 +1209,7 @@ void MidiController::DrawModule()
          ControlLayoutElement& control = GetLayoutControl(connection->mControl, connection->mMessageType);
          if (control.mControlCable)
          {
-            int x = 356;
+            int x = 370;
             int y = 59 + 20 * i;
 
             control.mControlCable->SetEnabled(UIControlConnection::sDrawCables);
@@ -1240,43 +1232,6 @@ namespace
 
 void MidiController::DrawModuleUnclipped()
 {
-   const float kDisplayMs = 500;
-   std::string displayString;
-   
-   IUIControl* drawControl = nullptr;
-   if (gTime < mLastBoundControlTime + kDisplayMs)
-   {
-      drawControl = mLastBoundUIControl;
-      if (drawControl != nullptr)
-         displayString = drawControl->Path() + " bound!";
-   }
-   else if (gTime < mLastConnectedActivityTime + kDisplayMs)
-   {
-      drawControl = mLastActivityUIControl;
-      if (drawControl != nullptr)
-         displayString = drawControl->Path() + ": " + drawControl->GetDisplayValue(drawControl->GetValue());
-   }
-
-   if (!displayString.empty() && drawControl != nullptr)
-   {
-      ofPushMatrix();
-      ofTranslate(-TheSynth->GetDrawOffset().x, -TheSynth->GetDrawOffset().y);
-      ofTranslate(-GetPosition().x, -GetPosition().y);
-      ofPushStyle();
-      ofFill();
-      ofVec2f pos(50, TheSynth->GetDrawRect().height - 100);
-      const float kWidth = 500;
-      const float kHeight = 70;
-      ofSetColor(80, 80, 80);
-      ofRect(pos.x, pos.y, kWidth, kHeight);
-      ofSetColor(120, 120, 120);
-      ofRect(pos.x, pos.y, kWidth * drawControl->GetMidiValue(), kHeight);
-      ofSetColor(255, 255, 255);
-      DrawTextBold(displayString, pos.x + 20, pos.y + 50, 40);
-      ofPopStyle();
-      ofPopMatrix();
-   }
-
    if (mHoveredLayoutElement != -1)
    {
       std::string tooltip;
@@ -1300,7 +1255,7 @@ void MidiController::DrawModuleUnclipped()
 
       ofFill();
       ofSetColor(50, 50, 50);
-      ofRect(pos.x, pos.y, width+10, 15);
+      ofRect(pos.x, pos.y, width + 10, 15);
 
       ofNoFill();
       ofSetColor(255, 255, 255);
@@ -1337,17 +1292,29 @@ std::string MidiController::GetDefaultTooltip(MidiMessageType type, int control)
    return str + ofToString(control);
 }
 
-void MidiController::OnClicked(int x, int y, bool right)
+UIControlConnection* MidiController::GetConnectionForCableSource(const PatchCableSource* source)
+{
+   for (const auto& c : mLayoutControls)
+   {
+      if (c.mActive && c.mControlCable == source)
+      {
+         return GetConnectionForControl(c.mType, c.mControl);
+      }
+   }
+   return nullptr;
+}
+
+void MidiController::OnClicked(float x, float y, bool right)
 {
    IDrawableModule::OnClicked(x, y, right);
-   
+
    if (right)
       return;
-   
+
    if (mMappingDisplayMode == kLayout)
    {
       bool selected = false;
-      for (int i=0; i<NUM_LAYOUT_CONTROLS; ++i)
+      for (int i = 0; i < NUM_LAYOUT_CONTROLS; ++i)
       {
          ControlLayoutElement& control = mLayoutControls[i];
          if (control.mActive)
@@ -1391,7 +1358,7 @@ bool MidiController::MouseMoved(float x, float y)
             }
          }
       }
-      
+
       int i = 0;
       for (auto* grid : mGrids)
       {
@@ -1414,7 +1381,7 @@ bool MidiController::IsInputConnected(bool immediate)
 
 int MidiController::GetNumConnectionsOnPage(int page)
 {
-   int i=0;
+   int i = 0;
    for (auto iter = mConnections.begin(); iter != mConnections.end(); ++iter)
    {
       UIControlConnection* connection = *iter;
@@ -1456,7 +1423,7 @@ void MidiController::GetModuleDimensions(float& width, float& height)
 {
    if (mMappingDisplayMode == kList)
    {
-      width = 880;
+      width = 900;
       height = 72 + 20 * GetNumConnectionsOnPage(mControllerPage);
    }
    else if (mMappingDisplayMode == kLayout)
@@ -1473,7 +1440,7 @@ void MidiController::GetModuleDimensions(float& width, float& height)
 
 void MidiController::ResyncTwoWay()
 {
-   for (auto i=mConnections.begin(); i != mConnections.end(); ++i)
+   for (auto i = mConnections.begin(); i != mConnections.end(); ++i)
    {
       (*i)->mLastControlValue = -1;
    }
@@ -1486,10 +1453,10 @@ void MidiController::SendNote(int page, int pitch, int velocity, bool forceNoteO
 
    if (page == mControllerPage)
    {
-      mDevice.SendNote(gTime, pitch,velocity,forceNoteOn, channel);
-      
+      mDevice.SendNote(gTime, pitch, velocity, forceNoteOn, channel);
+
       if (mNonstandardController)
-         mNonstandardController->SendValue(page, pitch, velocity/127.0f, forceNoteOn, channel);
+         mNonstandardController->SendValue(page, pitch, velocity / 127.0f, forceNoteOn, channel);
    }
 }
 
@@ -1531,13 +1498,21 @@ void MidiController::SendData(int page, unsigned char a, unsigned char b, unsign
 {
    if (page == mControllerPage)
    {
-      mDevice.SendData(a,b,c);
+      mDevice.SendData(a, b, c);
+   }
+}
+
+void MidiController::SendSysEx(int page, std::string data)
+{
+   if (page == mControllerPage)
+   {
+      mDevice.SendSysEx(data);
    }
 }
 
 UIControlConnection* MidiController::GetConnectionForControl(MidiMessageType messageType, int control)
 {
-   for (auto i=mConnections.begin(); i != mConnections.end(); ++i)
+   for (auto i = mConnections.begin(); i != mConnections.end(); ++i)
    {
       UIControlConnection* connection = *i;
       if (connection->mMessageType == messageType &&
@@ -1562,15 +1537,19 @@ ControlLayoutElement& MidiController::GetLayoutControl(int control, MidiMessageT
    return mLayoutControls[index];
 }
 
-void MidiController::LoadLayout(std::string filename)
+void MidiController::LoadControllerLayout(std::string filename)
 {
-   mLastLoadedLayoutFile = ofToDataPath("controllers/"+filename);
+   if (filename != kDefaultLayout)
+      mLastLoadedLayoutFile = ofToDataPath("controllers/" + filename);
+   else
+      mLastLoadedLayoutFile = "";
+
    for (int i = 0; i < mLayoutFileDropdown->GetNumValues(); ++i)
    {
       if (filename == mLayoutFileDropdown->GetLabel(i))
          mLayoutFileIndex = i;
    }
-   
+
    for (int i = 0; i < NUM_LAYOUT_CONTROLS; ++i)
    {
       mLayoutControls[i].mActive = false;
@@ -1583,9 +1562,10 @@ void MidiController::LoadLayout(std::string filename)
       delete grid;
    }
    mGrids.clear();
-   
+
    bool useDefaultLayout = true;
-   bool loaded = mLayoutData.open(mLastLoadedLayoutFile);
+   bool loaded = mLastLoadedLayoutFile != "" &&
+                 mLayoutData.open(mLastLoadedLayoutFile);
    try
    {
       if (loaded)
@@ -1593,7 +1573,6 @@ void MidiController::LoadLayout(std::string filename)
          if (mNonstandardController != nullptr)
             mNonstandardController->SetLayoutData(mLayoutData);
 
-         mFoundLayoutFile = true;
          if (!mLayoutData["outchannel"].isNull())
          {
             mOutChannel = mLayoutData["outchannel"].asInt();
@@ -1676,20 +1655,22 @@ void MidiController::LoadLayout(std::string filename)
                   messageType = kMidiMessage_PitchBend;
                if (mLayoutData["groups"][group]["messageType"] == "program")
                   messageType = kMidiMessage_Program;
-               ControlDrawType drawType;
+               ControlDrawType drawType{ kDrawType_Slider };
                if (mLayoutData["groups"][group]["drawType"] == "button")
                   drawType = kDrawType_Button;
                if (mLayoutData["groups"][group]["drawType"] == "knob")
                   drawType = kDrawType_Knob;
                if (mLayoutData["groups"][group]["drawType"] == "slider")
                   drawType = kDrawType_Slider;
-               bool incremental = false;
+               float incrementAmount = 0;
                if (!mLayoutData["groups"][group]["incremental"].isNull())
-                  incremental = mLayoutData["groups"][group]["incremental"].asBool();
+                  incrementAmount = mLayoutData["groups"][group]["incremental"].asBool() ? 1 : 0;
+               if (!mLayoutData["groups"][group]["increment_amount"].isNull())
+                  incrementAmount = mLayoutData["groups"][group]["increment_amount"].asDouble();
                int offVal = 0;
                int onVal = 127;
                if (!mLayoutData["groups"][group]["colors"].isNull() &&
-                  mLayoutData["groups"][group]["colors"].size() > 2)
+                   mLayoutData["groups"][group]["colors"].size() > 2)
                {
                   offVal = mLayoutData["groups"][group]["colors"][0u].asInt();
                   onVal = mLayoutData["groups"][group]["colors"][2u].asInt();
@@ -1711,7 +1692,7 @@ void MidiController::LoadLayout(std::string filename)
                   {
                      int index = col + row * cols;
                      int control = mLayoutData["groups"][group]["controls"][index].asInt();
-                     GetLayoutControl(control, messageType).Setup(this, messageType, control, drawType, incremental, offVal, onVal, false, connectionType, pos.x + kLayoutButtonsX + spacing.x*col, pos.y + kLayoutButtonsY + spacing.y*row, dim.x, dim.y);
+                     GetLayoutControl(control, messageType).Setup(this, messageType, control, drawType, incrementAmount, offVal, onVal, false, connectionType, pos.x + kLayoutButtonsX + spacing.x * col, pos.y + kLayoutButtonsY + spacing.y * row, dim.x, dim.y);
 
                      //clear out values on controllers
                      /*if (messageType == kMidiMessage_Note)
@@ -1727,7 +1708,7 @@ void MidiController::LoadLayout(std::string filename)
                   grid->mRows = rows;
                   grid->mCols = cols;
                   grid->mPosition.set(pos.x + kLayoutButtonsX - 2, pos.y + kLayoutButtonsY - 2);
-                  grid->mDimensions.set(spacing.x*cols + 2, spacing.y*rows + 2);
+                  grid->mDimensions.set(spacing.x * cols + 2, spacing.y * rows + 2);
                   grid->mType = messageType;
                   grid->mGridCable = new PatchCableSource(this, kConnectionType_Grid);
                   grid->mGridCable->SetManualPosition(pos.x + kLayoutButtonsX - 2, pos.y + kLayoutButtonsY - 2);
@@ -1745,7 +1726,7 @@ void MidiController::LoadLayout(std::string filename)
                   }
 
                   if (!mLayoutData["groups"][group]["colors"].isNull() &&
-                     mLayoutData["groups"][group]["colors"].size() > 0)
+                      mLayoutData["groups"][group]["colors"].size() > 0)
                   {
                      for (int i = 0; i < mLayoutData["groups"][group]["colors"].size(); ++i)
                         grid->mColors.push_back(mLayoutData["groups"][group]["colors"][i].asInt());
@@ -1765,34 +1746,40 @@ void MidiController::LoadLayout(std::string filename)
    catch (Json::LogicError& e)
    {
       loaded = false;
+      TheSynth->LogEvent(__PRETTY_FUNCTION__ + std::string(" json error: ") + e.what(), kLogEventType_Error);
    }
-   
+
    if (!loaded)
    {
-      mFoundLayoutFile = false;
+      mLayoutFileIndex = 0;
       mLayoutData.clear();
+      if (mLastLoadedLayoutFile == "")
+         mLayoutLoadError = "using default layout. set up controller files in " + ofToDataPath("controllers");
+      else
+         mLayoutLoadError = "couldn't load layout file at " + mLastLoadedLayoutFile + ", using the default layout instead";
    }
-   
+   else
+   {
+      mLayoutLoadError = "";
+   }
+
    if (useDefaultLayout)
    {
       const float kSpacingX = 20;
       const float kSpacingY = 20;
 
-      for (int i=0; i<128; ++i)
+      for (int i = 0; i < 128; ++i)
       {
-         GetLayoutControl(i, kMidiMessage_Control).
-            Setup(this, kMidiMessage_Control, i, kDrawType_Slider, false, 0, 127, true, kControlType_Default, i%8 * kSpacingX + kLayoutButtonsX + 9, i/8 * kSpacingY + kLayoutButtonsY, kSpacingX * .666f, kSpacingY * .93f);
-         GetLayoutControl(i, kMidiMessage_Note).
-            Setup(this, kMidiMessage_Note, i, kDrawType_Button, false, 0, 127, true, kControlType_Default, i%8 * kSpacingX + 8 * kSpacingX + kLayoutButtonsX + 15, i/8 * kSpacingY + kLayoutButtonsY, kSpacingX * .93f, kSpacingY * .93f);
+         GetLayoutControl(i, kMidiMessage_Control).Setup(this, kMidiMessage_Control, i, kDrawType_Slider, 0, 0, 127, true, kControlType_Default, i % 8 * kSpacingX + kLayoutButtonsX + 9, i / 8 * kSpacingY + kLayoutButtonsY, kSpacingX * .666f, kSpacingY * .93f);
+         GetLayoutControl(i, kMidiMessage_Note).Setup(this, kMidiMessage_Note, i, kDrawType_Button, 0, 0, 127, true, kControlType_Default, i % 8 * kSpacingX + 8 * kSpacingX + kLayoutButtonsX + 15, i / 8 * kSpacingY + kLayoutButtonsY, kSpacingX * .93f, kSpacingY * .93f);
       }
-      
-      GetLayoutControl(0, kMidiMessage_PitchBend).
-         Setup(this, kMidiMessage_PitchBend, 0, kDrawType_Slider, false, 0, 127, true, kControlType_Default, kLayoutButtonsX + kSpacingX * 17, kLayoutButtonsY, 25, 100);
+
+      GetLayoutControl(0, kMidiMessage_PitchBend).Setup(this, kMidiMessage_PitchBend, 0, kDrawType_Slider, 0, 0, 127, true, kControlType_Default, kLayoutButtonsX + kSpacingX * 17, kLayoutButtonsY, 25, 100);
    }
-   
+
    mLayoutWidth = 0;
    mLayoutHeight = 300;
-   for (int i=0; i<NUM_LAYOUT_CONTROLS; ++i)
+   for (int i = 0; i < NUM_LAYOUT_CONTROLS; ++i)
    {
       if (mLayoutControls[i].mActive)
       {
@@ -1804,15 +1791,22 @@ void MidiController::LoadLayout(std::string filename)
 
 void MidiController::OnDeviceChanged()
 {
-   std::string filename = mDeviceIn + ".json";
-   ofStringReplace(filename, "/", "");
-   LoadLayout(filename);
+   if (!mDeviceIn.empty())
+   {
+      std::string filename = mDeviceIn + ".json";
+      ofStringReplace(filename, "/", "");
+      LoadControllerLayout(filename);
+   }
+   else
+   {
+      LoadControllerLayout(kDefaultLayout);
+   }
 
    mModulation.GetModWheel(-1)->SetValue(mModWheelOffset);
    mModulation.GetPressure(-1)->SetValue(mPressureOffset);
 }
 
-void MidiController::CheckboxUpdated(Checkbox* checkbox)
+void MidiController::CheckboxUpdated(Checkbox* checkbox, double time)
 {
    for (auto iter = mConnections.begin(); iter != mConnections.end(); ++iter)
    {
@@ -1820,16 +1814,32 @@ void MidiController::CheckboxUpdated(Checkbox* checkbox)
       if (checkbox == connection->mPagelessCheckbox)
       {
          if (connection->mPageless == false) //just made this not pageless
-            connection->mPage = mControllerPage;   //make the current page this connection's page
+            connection->mPage = mControllerPage; //make the current page this connection's page
       }
    }
 }
 
-void MidiController::ButtonClicked(ClickButton* button)
+void MidiController::ButtonClicked(ClickButton* button, double time)
 {
    if (button == mAddConnectionButton)
    {
-      AddControlConnection(kMidiMessage_Control, 0, -1, nullptr);
+      int index;
+      for (index = 0; index <= 127; ++index)
+      {
+         bool isAvailable = true;
+         for (auto* connection : mConnections)
+         {
+            if (connection->mMessageType == kMidiMessage_Control && connection->mControl == index)
+            {
+               isAvailable = false;
+               break;
+            }
+         }
+
+         if (isAvailable)
+            break;
+      }
+      AddControlConnection(kMidiMessage_Control, index, -1, nullptr);
    }
    for (auto iter = mConnections.begin(); iter != mConnections.end(); ++iter)
    {
@@ -1850,7 +1860,7 @@ void MidiController::ButtonClicked(ClickButton* button)
    }
 }
 
-void MidiController::DropdownUpdated(DropdownList* list, int oldVal)
+void MidiController::DropdownUpdated(DropdownList* list, int oldVal, double time)
 {
    if (list == mPageSelector)
    {
@@ -1860,7 +1870,7 @@ void MidiController::DropdownUpdated(DropdownList* list, int oldVal)
          for (auto i = mListeners[mControllerPage].begin(); i != mListeners[mControllerPage].end(); ++i)
             (*i)->ControllerPageSelected();
       }
-      for (int i=0; i<NUM_LAYOUT_CONTROLS; ++i)
+      for (int i = 0; i < NUM_LAYOUT_CONTROLS; ++i)
       {
          if (mLayoutControls[i].mActive)
          {
@@ -1903,7 +1913,7 @@ void MidiController::DropdownUpdated(DropdownList* list, int oldVal)
    }
    if (list == mLayoutFileDropdown)
    {
-      LoadLayout(mLayoutFileDropdown->GetLabel(mLayoutFileIndex));
+      LoadControllerLayout(mLayoutFileDropdown->GetLabel(mLayoutFileIndex));
    }
 }
 
@@ -1915,7 +1925,7 @@ void MidiController::DropdownClicked(DropdownList* list)
    }
 }
 
-void MidiController::RadioButtonUpdated(RadioButton* radio, int oldVal)
+void MidiController::RadioButtonUpdated(RadioButton* radio, int oldVal, double time)
 {
    if (radio == mMappingDisplayModeSelector)
    {
@@ -1991,7 +2001,7 @@ void MidiController::PostRepatch(PatchCableSource* cableSource, bool fromUserCli
          return;
       }
    }
-   
+
    bool repatched = false;
    for (auto* connection : mConnections)
    {
@@ -1999,32 +2009,46 @@ void MidiController::PostRepatch(PatchCableSource* cableSource, bool fromUserCli
       if (repatched)
          break;
    }
-   
-   if (fromUserClick && !repatched && cableSource->GetTarget())   //need to make connection
+
+   if (cableSource->GetTarget()) //need to make connection
    {
-      int layoutControl = GetLayoutControlIndexForCable(cableSource);
-      if (layoutControl != -1)
+      if (fromUserClick && !repatched)
       {
-         UIControlConnection* connection = AddControlConnection(mLayoutControls[layoutControl].mType, mLayoutControls[layoutControl].mControl, -1, dynamic_cast<IUIControl*>(cableSource->GetTarget()));
-         
-         RadioButton* radioButton = dynamic_cast<RadioButton*>(cableSource->GetTarget());
-         if (radioButton && mLayoutControls[layoutControl].mDrawType == kDrawType_Button)
+         int layoutControl = GetLayoutControlIndexForCable(cableSource);
+         if (layoutControl != -1)
          {
-            connection->mType = kControlType_SetValue;
-            float closestSq = FLT_MAX;
-            int closestIdx = 0;
-            ofVec2f mousePos(TheSynth->GetRawMouseX(), TheSynth->GetRawMouseY());
-            for (int i=0; i<radioButton->GetNumValues(); ++i)
+            UIControlConnection* connection = AddControlConnection(mLayoutControls[layoutControl].mType, mLayoutControls[layoutControl].mControl, -1, dynamic_cast<IUIControl*>(cableSource->GetTarget()));
+
+            RadioButton* radioButton = dynamic_cast<RadioButton*>(cableSource->GetTarget());
+            if (radioButton && mLayoutControls[layoutControl].mDrawType == kDrawType_Button)
             {
-               float distSq = (mousePos - radioButton->GetOptionPosition(i)).distanceSquared();
-               if (distSq < closestSq)
+               connection->mType = kControlType_SetValue;
+               float closestSq = FLT_MAX;
+               int closestIdx = 0;
+               ofVec2f mousePos(TheSynth->GetRawMouseX(), TheSynth->GetRawMouseY());
+               for (int i = 0; i < radioButton->GetNumValues(); ++i)
                {
-                  closestSq = distSq;
-                  closestIdx = i;
+                  float distSq = (mousePos - radioButton->GetOptionPosition(i)).distanceSquared();
+                  if (distSq < closestSq)
+                  {
+                     closestSq = distSq;
+                     closestIdx = i;
+                  }
                }
+               connection->mValue = closestIdx;
             }
-            connection->mValue = closestIdx;
          }
+      }
+   }
+   else // need to remove a connection if no cables remain
+   {
+      auto uiConnection = GetConnectionForCableSource(cableSource);
+      if (uiConnection == nullptr ||
+          (uiConnection->mSpecialBinding == kSpecialBinding_None &&
+           uiConnection->mUIControlPathInput[0] != 0))
+      {
+         mConnections.remove(uiConnection);
+         delete uiConnection;
       }
    }
 }
@@ -2040,7 +2064,7 @@ void MidiController::OnCableGrabbed(PatchCableSource* cableSource)
 
 int MidiController::GetLayoutControlIndexForCable(PatchCableSource* cable) const
 {
-   for (int i=0; i<NUM_LAYOUT_CONTROLS; ++i)
+   for (int i = 0; i < NUM_LAYOUT_CONTROLS; ++i)
    {
       if (mLayoutControls[i].mControlCable == cable)
          return i;
@@ -2064,11 +2088,11 @@ std::vector<std::string> MidiController::GetAvailableInputDevices()
 {
    if (!juce::MessageManager::existsAndIsCurrentThread())
       return sCachedInputDevices;
-   
+
    std::vector<std::string> devices;
    for (auto& d : MidiInput::getAvailableDevices())
    {
-      if (d.identifier == "blah")   //my BCF-2000 and BCR-2000 both report as a BCF-2000, come up with some hack here to name it correctly
+      if (d.identifier == "blah") //my BCF-2000 and BCR-2000 both report as a BCF-2000, come up with some hack here to name it correctly
          devices.push_back("BCR-2000");
       else
          devices.push_back(d.name.toStdString());
@@ -2076,7 +2100,7 @@ std::vector<std::string> MidiController::GetAvailableInputDevices()
 
    devices.push_back("monome");
    devices.push_back("osccontroller");
-   
+
    sCachedInputDevices = devices;
 
    return devices;
@@ -2088,25 +2112,26 @@ std::vector<std::string> MidiController::GetAvailableOutputDevices()
 {
    if (!juce::MessageManager::existsAndIsCurrentThread())
       return sCachedOutputDevices;
-   
+
    std::vector<std::string> devices;
    for (auto& d : MidiOutput::getDevices())
       devices.push_back(d.toStdString());
 
    devices.push_back("monome");
    devices.push_back("osccontroller");
-   
+
    sCachedOutputDevices = devices;
 
    return devices;
 }
 
-namespace {
+namespace
+{
    void FillMidiInput(DropdownList* list)
    {
       assert(list);
       const auto& devices = MidiController::GetAvailableInputDevices();
-      for (int i=0; i< devices.size(); ++i)
+      for (int i = 0; i < devices.size(); ++i)
          list->AddLabel(devices[i].c_str(), i);
    }
 
@@ -2142,7 +2167,7 @@ void MidiController::ConnectDevice()
    if (mDeviceIn == "xboxcontroller")
    {
       //TODO_PORT(Ryan)
-      
+
       //Xbox360Controller* xbox = new Xbox360Controller(this);
       //mNonstandardController = xbox;
    }
@@ -2159,7 +2184,7 @@ void MidiController::ConnectDevice()
    {
       if (dynamic_cast<OscController*>(mNonstandardController) == nullptr)
       {
-         OscController* osc = new OscController(this,"",-1,mOscInPort);
+         OscController* osc = new OscController(this, "", -1, mOscInPort);
          mNonstandardController = osc;
       }
    }
@@ -2181,18 +2206,18 @@ void MidiController::ConnectDevice()
 
       mDevice.ConnectInput(mDeviceIn.c_str());
    }
-   
+
    if (mDeviceOut.length() > 0 && mNonstandardController == nullptr)
    {
       mTwoWay = true;
       mDevice.ConnectOutput(mDeviceOut.c_str(), mOutChannel);
    }
-   
+
    if (mNonstandardController != nullptr)
       mNonstandardController->SetLayoutData(mLayoutData);
 
    mIsConnected = IsInputConnected(K(immediate));
-   
+
    mInitialConnectionTime = gTime;
 }
 
@@ -2201,8 +2226,8 @@ void MidiController::LoadLayout(const ofxJSONElement& moduleInfo)
    mModuleSaveData.LoadString("devicein", moduleInfo, "", FillMidiInput);
    mModuleSaveData.LoadString("deviceout", moduleInfo, "", FillMidiOutput);
    mModuleSaveData.LoadString("target", moduleInfo);
-   mModuleSaveData.LoadFloat("velocitymult",moduleInfo,1,0,10,K(isTextField));
-   mModuleSaveData.LoadBool("usechannelasvoice",moduleInfo,false);
+   mModuleSaveData.LoadFloat("velocitymult", moduleInfo, 1, 0, 10, K(isTextField));
+   mModuleSaveData.LoadBool("usechannelasvoice", moduleInfo, false);
    EnumMap channelMap;
    channelMap["any"] = (int)ChannelFilter::kAny;
    channelMap["01"] = (int)ChannelFilter::k1;
@@ -2222,19 +2247,21 @@ void MidiController::LoadLayout(const ofxJSONElement& moduleInfo)
    channelMap["15"] = (int)ChannelFilter::k15;
    channelMap["16"] = (int)ChannelFilter::k16;
    mModuleSaveData.LoadEnum<ChannelFilter>("channelfilter", moduleInfo, (int)ChannelFilter::kAny, nullptr, &channelMap);
-   mModuleSaveData.LoadInt("noteoffset",moduleInfo,0,-999,999,K(isTextField));
-   mModuleSaveData.LoadFloat("pitchbendrange",moduleInfo,2,1,96,K(isTextField));
-   mModuleSaveData.LoadInt("modwheelcc(1or74)",moduleInfo,1,0,127,K(isTextField));
+   mModuleSaveData.LoadInt("noteoffset", moduleInfo, 0, -999, 999, K(isTextField));
+   mModuleSaveData.LoadFloat("pitchbendrange", moduleInfo, 2, 1, 96, K(isTextField));
+   mModuleSaveData.LoadInt("modwheelcc(1or74)", moduleInfo, 1, 0, 127, K(isTextField));
    mModuleSaveData.LoadFloat("modwheeloffset", moduleInfo, 0, 0, 1, K(isTextField));
    mModuleSaveData.LoadFloat("pressureoffset", moduleInfo, 0, 0, 1, K(isTextField));
-   
+
    mModuleSaveData.LoadInt("outchannel", moduleInfo, 1, 1, 16);
-   
-   mModuleSaveData.LoadBool("negativeedge",moduleInfo,false);
+
+   mModuleSaveData.LoadBool("send_cc_output", moduleInfo, false);
+   mModuleSaveData.LoadBool("negativeedge", moduleInfo, false);
    mModuleSaveData.LoadBool("incrementalsliders", moduleInfo, false);
    mModuleSaveData.LoadBool("twoway_on_change", moduleInfo, true);
    mModuleSaveData.LoadBool("resend_feedback_on_release", moduleInfo, false);
-   
+   mModuleSaveData.LoadBool("show_activity_ui_overlay", moduleInfo, true);
+
    mConnectionsJson = moduleInfo["connections"];
 
    SetUpFromSaveData();
@@ -2248,29 +2275,31 @@ void MidiController::SetUpFromSaveData()
    mChannelFilter = mModuleSaveData.GetEnum<ChannelFilter>("channelfilter");
    SetNoteOffset(mModuleSaveData.GetInt("noteoffset"));
    SetPitchBendRange(mModuleSaveData.GetFloat("pitchbendrange"));
-   
+
    mModwheelCC = mModuleSaveData.GetInt("modwheelcc(1or74)");
    mModWheelOffset = mModuleSaveData.GetFloat("modwheeloffset");
    mPressureOffset = mModuleSaveData.GetFloat("pressureoffset");
    mModulation.GetModWheel(-1)->SetValue(mModWheelOffset);
    mModulation.GetPressure(-1)->SetValue(mPressureOffset);
-   
+
    mDeviceIn = mModuleSaveData.GetString("devicein");
    mDeviceOut = mModuleSaveData.GetString("deviceout");
    mOutChannel = mModuleSaveData.GetInt("outchannel");
    assert(mOutChannel > 0 && mOutChannel <= 16);
-   
+
+   mSendCCOutput = mModuleSaveData.GetBool("send_cc_output");
    UseNegativeEdge(mModuleSaveData.GetBool("negativeedge"));
    mSlidersDefaultToIncremental = mModuleSaveData.GetBool("incrementalsliders");
    mSendTwoWayOnChange = mModuleSaveData.GetBool("twoway_on_change");
    mResendFeedbackOnRelease = mModuleSaveData.GetBool("resend_feedback_on_release");
-   
+   mShowActivityUIOverlay = mModuleSaveData.GetBool("show_activity_ui_overlay");
+
    BuildControllerList();
-   
+
    UpdateControllerIndex();
 
    ConnectDevice();
-   
+
    OnDeviceChanged();
 }
 
@@ -2278,7 +2307,7 @@ void MidiController::UpdateControllerIndex()
 {
    mControllerIndex = -1;
    const auto& devices = GetAvailableInputDevices();
-   for (int i=0; i<devices.size(); ++i)
+   for (int i = 0; i < devices.size(); ++i)
    {
       if (devices[i].c_str() == mDeviceIn)
          mControllerIndex = i;
@@ -2287,8 +2316,6 @@ void MidiController::UpdateControllerIndex()
 
 void MidiController::SaveLayout(ofxJSONElement& moduleInfo)
 {
-   IDrawableModule::SaveLayout(moduleInfo);
-   
    mConnectionsJson.clear();
    mConnectionsJson.resize((int)mConnections.size());
    int i = 0;
@@ -2309,7 +2336,7 @@ void MidiController::SaveLayout(ofxJSONElement& moduleInfo)
       {
          mConnectionsJson[i]["uicontrol"] = connection->mUIControl->Path();
       }
-         
+
       if (connection->mMessageType == kMidiMessage_Control)
          mConnectionsJson[i]["type"] = "control";
       if (connection->mMessageType == kMidiMessage_Note)
@@ -2318,12 +2345,12 @@ void MidiController::SaveLayout(ofxJSONElement& moduleInfo)
          mConnectionsJson[i]["type"] = "program";
       if (connection->mMessageType == kMidiMessage_PitchBend)
          mConnectionsJson[i]["type"] = "pitchbend";
-         
+
       if (connection->mChannel != -1)
          mConnectionsJson[i]["channel"] = connection->mChannel;
       if (!connection->mPageless)
          mConnectionsJson[i]["page"] = connection->mPage;
-         
+
       if (connection->mType == kControlType_SetValue)
          mConnectionsJson[i]["value"] = connection->mValue;
       else if (connection->mType == kControlType_Toggle)
@@ -2335,7 +2362,7 @@ void MidiController::SaveLayout(ofxJSONElement& moduleInfo)
          mConnectionsJson[i]["value"] = connection->mValue;
          mConnectionsJson[i]["release"] = true;
       }
-         
+
       if (connection->mMidiOffValue != 0)
          mConnectionsJson[i]["midi_off_value"] = connection->mMidiOffValue;
       if (connection->mMidiOnValue != 127)
@@ -2351,13 +2378,13 @@ void MidiController::SaveLayout(ofxJSONElement& moduleInfo)
 
       ++i;
    }
-   
+
    int gridIndex = 0;
    for (auto* grid : mGrids)
    {
       mConnectionsJson[i]["grid_index"] = gridIndex;
       mConnectionsJson[i]["grid_pages"].resize(MAX_MIDI_PAGES);
-      for (int page=0; page<MAX_MIDI_PAGES; ++page)
+      for (int page = 0; page < MAX_MIDI_PAGES; ++page)
       {
          auto* target = grid->mGridControlTarget[page];
          if (target != nullptr)
@@ -2368,20 +2395,15 @@ void MidiController::SaveLayout(ofxJSONElement& moduleInfo)
       ++i;
       ++gridIndex;
    }
-   
-   moduleInfo["connections"] = mConnectionsJson;
-}
 
-namespace
-{
-   const int kSaveStateRev = 1;
+   moduleInfo["connections"] = mConnectionsJson;
 }
 
 void MidiController::SaveState(FileStreamOut& out)
 {
-   IDrawableModule::SaveState(out);
+   out << GetModuleSaveStateRev();
 
-   out << kSaveStateRev;
+   IDrawableModule::SaveState(out);
 
    bool hasNonstandardController = (mNonstandardController != nullptr);
    out << hasNonstandardController;
@@ -2389,16 +2411,16 @@ void MidiController::SaveState(FileStreamOut& out)
       mNonstandardController->SaveState(out);
 }
 
-void MidiController::LoadState(FileStreamIn& in)
+void MidiController::LoadState(FileStreamIn& in, int rev)
 {
-   IDrawableModule::LoadState(in);
+   IDrawableModule::LoadState(in, rev);
 
    if (!ModuleContainer::DoesModuleHaveMoreSaveData(in))
-      return;  //this was saved before we added versioning, bail out
+      return; //this was saved before we added versioning, bail out
 
-   int rev;
-   in >> rev;
-   LoadStateValidate(rev == kSaveStateRev);
+   if (ModularSynth::sLoadingFileSaveStateRev < 423)
+      in >> rev;
+   LoadStateValidate(rev <= GetModuleSaveStateRev());
 
    bool hasNonstandardController;
    in >> hasNonstandardController;
@@ -2413,13 +2435,13 @@ void UIControlConnection::SetUIControl(std::string path)
 {
    if (mUIControl)
       mUIControl->RemoveRemoteController();
-      
+
    if (path == "hover")
    {
       mUIControl = nullptr;
       mSpecialBinding = kSpecialBinding_Hover;
    }
-   else if (path.substr(0,7) == "hotbind")
+   else if (path.substr(0, 7) == "hotbind")
    {
       mUIControl = nullptr;
       int index = path[7] - '0';
@@ -2436,7 +2458,7 @@ void UIControlConnection::SetUIControl(std::string path)
       {
       }
       mSpecialBinding = kSpecialBinding_None;
-      
+
       if (mUIControl)
          mUIControl->AddRemoteController();
    }
@@ -2449,32 +2471,32 @@ void UIControlConnection::CreateUIControls(int index)
       TheSynth->LogEvent("Error setting up UIControlConnection", kLogEventType_Error);
       return;
    }
-   
+
    static int sControlID = 0;
-   mMessageTypeDropdown = new DropdownList(mUIOwner,"messagetype",12,-1,((int*)&mMessageType), 50);
-   mControlEntry = new TextEntry(mUIOwner,"control",-1,-1,3,&mControl,0,127);
+   mMessageTypeDropdown = new DropdownList(mUIOwner, "messagetype", 12, -1, ((int*)&mMessageType), 50);
+   mControlEntry = new TextEntry(mUIOwner, "control", -1, -1, 3, &mControl, 0, 127);
    mControlEntry->PositionTo(mMessageTypeDropdown, kAnchor_Right);
-   mChannelDropdown = new DropdownList(mUIOwner,"channel",mControlEntry,kAnchor_Right,&mChannel, 40);
-   mUIControlPathEntry = new TextEntry(mUIOwner,"path",-1,-1,25,mUIControlPathInput);
+   mChannelDropdown = new DropdownList(mUIOwner, "channel", mControlEntry, kAnchor_Right, &mChannel, 40);
+   mUIControlPathEntry = new TextEntry(mUIOwner, "path", -1, -1, 25, mUIControlPathInput);
    mUIControlPathEntry->PositionTo(mChannelDropdown, kAnchor_Right);
-   mControlTypeDropdown = new DropdownList(mUIOwner,"controltype",mUIControlPathEntry,kAnchor_Right,((int*)&mType),55);
-   mValueEntry = new TextEntry(mUIOwner,"value",-1,-1,5,&mValue,-FLT_MAX,FLT_MAX);
+   mControlTypeDropdown = new DropdownList(mUIOwner, "controltype", mUIControlPathEntry, kAnchor_Right, ((int*)&mType), 55);
+   mValueEntry = new TextEntry(mUIOwner, "value", -1, -1, 5, &mValue, -FLT_MAX, FLT_MAX);
    mValueEntry->PositionTo(mControlTypeDropdown, kAnchor_Right);
-   mIncrementalEntry = new TextEntry(mUIOwner,"increment",-1,-1,4,&mIncrementAmount,-FLT_MAX,FLT_MAX);
+   mIncrementalEntry = new TextEntry(mUIOwner, "increment", -1, -1, 4, &mIncrementAmount, -FLT_MAX, FLT_MAX);
    mIncrementalEntry->PositionTo(mValueEntry, kAnchor_Right);
-   mTwoWayCheckbox = new Checkbox(mUIOwner,"twoway",mIncrementalEntry,kAnchor_Right,&mTwoWay);
-   mFeedbackDropdown = new DropdownList(mUIOwner,"feedback",mTwoWayCheckbox,kAnchor_Right,&mFeedbackControl, 40);
-   mMidiOffEntry = new TextEntry(mUIOwner,"midi off",-1,-1,3,&mMidiOffValue,0,127);
+   mTwoWayCheckbox = new Checkbox(mUIOwner, "twoway", mIncrementalEntry, kAnchor_Right, &mTwoWay);
+   mFeedbackDropdown = new DropdownList(mUIOwner, "feedback", mTwoWayCheckbox, kAnchor_Right, &mFeedbackControl, 40);
+   mMidiOffEntry = new TextEntry(mUIOwner, "midi off", -1, -1, 3, &mMidiOffValue, 0, 127);
    mMidiOffEntry->PositionTo(mFeedbackDropdown, kAnchor_Right);
-   mMidiOnEntry = new TextEntry(mUIOwner,"midi on",-1,-1,3,&mMidiOnValue,0,127);
+   mMidiOnEntry = new TextEntry(mUIOwner, "midi on", -1, -1, 3, &mMidiOnValue, 0, 127);
    mMidiOnEntry->PositionTo(mMidiOffEntry, kAnchor_Right);
-   mScaleOutputCheckbox = new Checkbox(mUIOwner,"scale",mMidiOnEntry,kAnchor_Right,&mScaleOutput);
-   mBlinkCheckbox = new Checkbox(mUIOwner,"blink",mScaleOutputCheckbox,kAnchor_Right,&mBlink);
-   mPagelessCheckbox = new Checkbox(mUIOwner,"pageless",mBlinkCheckbox,kAnchor_Right,&mPageless);
-   mRemoveButton = new ClickButton(mUIOwner," x ",mPagelessCheckbox,kAnchor_Right);
-   mCopyButton = new ClickButton(mUIOwner,"copy",mRemoveButton,kAnchor_Right);
+   mScaleOutputCheckbox = new Checkbox(mUIOwner, "scale", mMidiOnEntry, kAnchor_Right, &mScaleOutput);
+   mBlinkCheckbox = new Checkbox(mUIOwner, "blink", mScaleOutputCheckbox, kAnchor_Right, &mBlink);
+   mPagelessCheckbox = new Checkbox(mUIOwner, "pageless", mBlinkCheckbox, kAnchor_Right, &mPageless);
+   mRemoveButton = new ClickButton(mUIOwner, " x ", mPagelessCheckbox, kAnchor_Right);
+   mCopyButton = new ClickButton(mUIOwner, "copy", mRemoveButton, kAnchor_Right);
    ++sControlID;
-   
+
    mEditorControls.push_back(mMessageTypeDropdown);
    mEditorControls.push_back(mControlEntry);
    mEditorControls.push_back(mChannelDropdown);
@@ -2491,18 +2513,18 @@ void UIControlConnection::CreateUIControls(int index)
    mEditorControls.push_back(mPagelessCheckbox);
    mEditorControls.push_back(mRemoveButton);
    mEditorControls.push_back(mCopyButton);
-   
+
    for (auto iter = mEditorControls.begin(); iter != mEditorControls.end(); ++iter)
    {
       //(*iter)->SetNoHover(true);
       (*iter)->SetShouldSaveState(false);
    }
-   
+
    mMessageTypeDropdown->AddLabel("note", kMidiMessage_Note);
    mMessageTypeDropdown->AddLabel("cc", kMidiMessage_Control);
    mMessageTypeDropdown->AddLabel("prgm", kMidiMessage_Program);
    mMessageTypeDropdown->AddLabel("bend", kMidiMessage_PitchBend);
-   
+
    mChannelDropdown->AddLabel("any", -1);
    mChannelDropdown->AddLabel("0", 0);
    mChannelDropdown->AddLabel("1", 1);
@@ -2520,19 +2542,19 @@ void UIControlConnection::CreateUIControls(int index)
    mChannelDropdown->AddLabel("13", 13);
    mChannelDropdown->AddLabel("14", 14);
    mChannelDropdown->AddLabel("15", 15);
-   
+
    mControlTypeDropdown->AddLabel("slider", kControlType_Slider);
    mControlTypeDropdown->AddLabel("set", kControlType_SetValue);
    mControlTypeDropdown->AddLabel("release", kControlType_SetValueOnRelease);
    mControlTypeDropdown->AddLabel("toggle", kControlType_Toggle);
    mControlTypeDropdown->AddLabel("direct", kControlType_Direct);
-   
+
    mFeedbackDropdown->AddLabel("self", -1);
    mFeedbackDropdown->AddLabel("none", -2);
-   for (int i=0; i<=127; ++i)   //CCs
-      mFeedbackDropdown->AddLabel(("cc"+ofToString(i)).c_str(), i);
-   for (int i = 0; i <= 127; ++i)   //notes
-      mFeedbackDropdown->AddLabel(("n" + ofToString(i)).c_str(), i+128);
+   for (int i = 0; i <= 127; ++i) //CCs
+      mFeedbackDropdown->AddLabel(("cc" + ofToString(i)).c_str(), i);
+   for (int i = 0; i <= 127; ++i) //notes
+      mFeedbackDropdown->AddLabel(("n" + ofToString(i)).c_str(), i + 128);
 }
 
 void UIControlConnection::SetShowing(bool enabled)
@@ -2541,10 +2563,14 @@ void UIControlConnection::SetShowing(bool enabled)
       (*iter)->SetShowing(enabled);
 }
 
-void UIControlConnection::PreDraw()
+void UIControlConnection::Poll()
 {
-   SetShowing(true);
-   
+   if (!mShouldRetryForUIControlAt.empty())
+   {
+      SetUIControl(mShouldRetryForUIControlAt);
+      mShouldRetryForUIControlAt = "";
+   }
+
    if (mUIControl || mSpecialBinding != kSpecialBinding_None)
    {
       if (mSpecialBinding == kSpecialBinding_Hover)
@@ -2562,30 +2588,37 @@ void UIControlConnection::PreDraw()
          if (mUIOwner->GetLayoutControl(mControl, mMessageType).mControlCable)
             mUIOwner->GetLayoutControl(mControl, mMessageType).mControlCable->SetTarget(mUIControl);
       }
-      mUIControlPathEntry->SetInErrorMode(false);
+      if (mUIControlPathEntry != nullptr)
+         mUIControlPathEntry->SetInErrorMode(false);
    }
    else
    {
-      mUIControlPathEntry->SetInErrorMode(true);
+      if (mUIControlPathEntry != nullptr)
+         mUIControlPathEntry->SetInErrorMode(true);
       if (PatchCable::sActivePatchCable == nullptr)
       {
          if (mUIOwner->GetLayoutControl(mControl, mMessageType).mControlCable)
             mUIOwner->GetLayoutControl(mControl, mMessageType).mControlCable->ClearPatchCables();
       }
    }
-   
+}
+
+void UIControlConnection::PreDraw()
+{
+   SetShowing(true);
+
    if (mUIOwner->GetLayoutControl(mControl, mMessageType).mControlCable)
       mUIOwner->GetLayoutControl(mControl, mMessageType).mControlCable->SetEnabled(sDrawCables);
-   
+
    mControlEntry->SetShowing(mMessageType != kMidiMessage_PitchBend);
-   mValueEntry->SetShowing((mType == kControlType_SetValue|| mType == kControlType_SetValueOnRelease) && mIncrementAmount == 0);
+   mValueEntry->SetShowing((mType == kControlType_SetValue || mType == kControlType_SetValueOnRelease) && mIncrementAmount == 0);
    mIncrementalEntry->SetShowing(mType == kControlType_Slider || mType == kControlType_SetValue || mType == kControlType_SetValueOnRelease);
 }
 
 void UIControlConnection::DrawList(int index)
 {
    PreDraw();
-   
+
    mControlEntry->DrawLabel(false);
    mChannelDropdown->DrawLabel(false);
    mValueEntry->DrawLabel(false);
@@ -2593,36 +2626,38 @@ void UIControlConnection::DrawList(int index)
    mMidiOnEntry->DrawLabel(false);
    mIncrementalEntry->DrawLabel(false);
    mFeedbackDropdown->DrawLabel(false);
-   
+
+   int x = 12;
    int y = 52 + 20 * index;
-   
+
    IUIControl* lastControl = nullptr;
    for (auto iter = mEditorControls.begin(); iter != mEditorControls.end(); ++iter)
    {
-      if (lastControl)
-         (*iter)->PositionTo(lastControl, kAnchor_Right);
-      else
-         (*iter)->SetPosition(12,y);
+      (*iter)->SetPosition(x, y);
       (*iter)->Draw();
       lastControl = *iter;
+
+      x += (*iter)->GetRect().width + 3;
+      if (*iter == mUIControlPathEntry)
+         x += 13;
    }
-   
+
    ofRectangle rect = mUIControlPathEntry->GetRect(true);
    if (mUIOwner->GetLayoutControl(mControl, mMessageType).mControlCable)
-      mUIOwner->GetLayoutControl(mControl, mMessageType).mControlCable->SetManualPosition(rect.x + rect.width - 5, rect.y + rect.height/2);
-   
+      mUIOwner->GetLayoutControl(mControl, mMessageType).mControlCable->SetManualPosition(rect.x + rect.width - 5, rect.y + rect.height / 2);
+
    if (gTime - mLastActivityTime > 0 && gTime - mLastActivityTime < 200)
    {
       ofPushStyle();
       if (GetUIControl())
-         ofSetColor(0,255,0,255*(1-(gTime - mLastActivityTime)/200));
+         ofSetColor(0, 255, 0, 255 * (1 - (gTime - mLastActivityTime) / 200));
       else
-         ofSetColor(255,0,0,255*(1-(gTime - mLastActivityTime)/200));
+         ofSetColor(255, 0, 0, 255 * (1 - (gTime - mLastActivityTime) / 200));
       ofFill();
-      ofRect(1,y+3,10,10);
+      ofRect(1, y + 3, 10, 10);
       ofPopStyle();
    }
-   
+
    /*if (mUIControlPathEntry == IKeyboardFocusListener::GetActiveKeyboardFocus() || TheSynth->InMidiMapMode())
    {
       IUIControl* uiControl = GetUIControl();
@@ -2654,7 +2689,7 @@ void UIControlConnection::DrawList(int index)
 void UIControlConnection::DrawLayout()
 {
    PreDraw();
-   
+
    mControlEntry->DrawLabel(true);
    mChannelDropdown->DrawLabel(true);
    mValueEntry->DrawLabel(true);
@@ -2662,8 +2697,8 @@ void UIControlConnection::DrawLayout()
    mMidiOnEntry->DrawLabel(true);
    mIncrementalEntry->DrawLabel(true);
    mFeedbackDropdown->DrawLabel(true);
-   
-   mMessageTypeDropdown->SetPosition(kLayoutControlsX+5, kLayoutControlsY+3);
+
+   mMessageTypeDropdown->SetPosition(kLayoutControlsX + 5, kLayoutControlsY + 3);
    mControlEntry->PositionTo(mMessageTypeDropdown, kAnchor_Right_Padded);
    mChannelDropdown->PositionTo(mControlEntry, kAnchor_Right_Padded);
    mUIControlPathEntry->PositionTo(mMessageTypeDropdown, kAnchor_Below);
@@ -2679,7 +2714,7 @@ void UIControlConnection::DrawLayout()
    mPagelessCheckbox->PositionTo(mTwoWayCheckbox, kAnchor_Below);
    mRemoveButton->PositionTo(mPagelessCheckbox, kAnchor_Below);
    mCopyButton->SetShowing(false);
-   
+
    for (auto iter = mEditorControls.begin(); iter != mEditorControls.end(); ++iter)
       (*iter)->Draw();
 }
@@ -2716,30 +2751,30 @@ UIControlConnection::~UIControlConnection()
    mEditorControls.clear();
 }
 
-void ControlLayoutElement::Setup(MidiController* owner, MidiMessageType type, int control, ControlDrawType drawType, bool incremental, int offVal, int onVal, bool scaleOutput, ControlType connectionType, float x, float y, float w, float h)
+void ControlLayoutElement::Setup(MidiController* owner, MidiMessageType type, int control, ControlDrawType drawType, float incrementAmount, int offVal, int onVal, bool scaleOutput, ControlType connectionType, float x, float y, float w, float h)
 {
-   assert(incremental == false || type == kMidiMessage_Control);  //only control type can be incremental
-   
+   assert(incrementAmount == 0 || type == kMidiMessage_Control); //only control type can be incremental
+
    mActive = true;
    mType = type;
    mControl = control;
    mDrawType = drawType;
-   mIncremental = incremental;
+   mIncrementAmount = incrementAmount;
    mOffVal = offVal;
    mOnVal = onVal;
    mScaleOutput = scaleOutput;
    mConnectionType = connectionType;
-   mPosition.set(x,y);
-   mDimensions.set(w,h);
+   mPosition.set(x, y);
+   mDimensions.set(w, h);
    mLastValue = 0;
    mLastActivityTime = -9999;
-   
+
    if (mControlCable == nullptr)
    {
       mControlCable = new PatchCableSource(owner, kConnectionType_UIControl);
       owner->AddPatchCableSource(mControlCable);
       ofColor color = mControlCable->GetColor();
-      color.a *= .2f;
+      color.a *= .25f;
       mControlCable->SetColor(color);
    }
 }

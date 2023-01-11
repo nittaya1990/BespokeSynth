@@ -30,6 +30,7 @@
 #include "TitleBar.h"
 #include "EffectChain.h"
 #include "UserPrefs.h"
+#include "VersionInfo.h"
 
 #include "juce_gui_basics/juce_gui_basics.h"
 #include "juce_opengl/juce_opengl.h"
@@ -39,10 +40,6 @@ bool HelpDisplay::sTooltipsLoaded = false;
 std::list<HelpDisplay::ModuleTooltipInfo> HelpDisplay::sTooltips;
 
 HelpDisplay::HelpDisplay()
-: mShowTooltipsCheckbox(nullptr)
-, mWidth(700)
-, mHeight(700)
-, mScreenshotModule(nullptr)
 {
    LoadHelp();
 
@@ -53,9 +50,10 @@ HelpDisplay::HelpDisplay()
 void HelpDisplay::CreateUIControls()
 {
    IDrawableModule::CreateUIControls();
-   
+
    mShowTooltipsCheckbox = new Checkbox(this, "show tooltips", 3, 22, &sShowTooltips);
-   mDumpModuleInfoButton = new ClickButton(this, "dump module info", 110, 22);
+   mCopyBuildInfoButton = new ClickButton(this, "copy build info", mShowTooltipsCheckbox, kAnchor_Right);
+   mDumpModuleInfoButton = new ClickButton(this, "dump module info", 200, 22);
    mDoModuleScreenshotsButton = new ClickButton(this, "do screenshots", mDumpModuleInfoButton, kAnchor_Right);
    mDoModuleDocumentationButton = new ClickButton(this, "do documentation", mDoModuleScreenshotsButton, kAnchor_Right);
    mTutorialVideoLinkButton = new ClickButton(this, "youtu.be/SYBc8X2IxqM", 160, 61);
@@ -78,39 +76,45 @@ void HelpDisplay::LoadHelp()
       ofStringReplace(help, "\r", "");
       mHelpText = ofSplitString(help, "\n");
    }
+
+   mMaxScrollAmount = (int)mHelpText.size() * 14;
 }
 
 void HelpDisplay::DrawModule()
 {
    ofPushStyle();
-   ofSetColor(50,50,50,200);
+   ofSetColor(50, 50, 50, 200);
    ofFill();
-   ofRect(0,0,mWidth,mHeight);
+   ofRect(0, 0, mWidth, mHeight);
    ofPopStyle();
 
-   DrawTextRightJustify(GetBuildInfoString(), mWidth-5, 12);
-   
+   DrawTextRightJustify(GetBuildInfoString(), mWidth - 5, 12);
+
    mShowTooltipsCheckbox->Draw();
+   mCopyBuildInfoButton->Draw();
    mDumpModuleInfoButton->SetShowing(GetKeyModifiers() == kModifier_Shift);
    mDumpModuleInfoButton->Draw();
    mDoModuleScreenshotsButton->SetShowing(GetKeyModifiers() == kModifier_Shift);
    mDoModuleScreenshotsButton->Draw();
    mDoModuleDocumentationButton->SetShowing(GetKeyModifiers() == kModifier_Shift);
    mDoModuleDocumentationButton->Draw();
-   
+
    DrawTextNormal("video overview available at:", 4, 73);
    mTutorialVideoLinkButton->Draw();
    DrawTextNormal("documentation:", 4, 92);
    mDocsLinkButton->Draw();
    DrawTextNormal("join the ", 260, 92);
    mDiscordLinkButton->Draw();
-   
+
    mHeight = 100;
+   const int kLineHeight = 14;
+   ofClipWindow(0, mHeight, mWidth, (int)mHelpText.size() * kLineHeight, true);
    for (size_t i = 0; i < mHelpText.size(); ++i)
    {
-      DrawTextNormal(mHelpText[i], 4, mHeight);
+      DrawTextNormal(mHelpText[i], 4, mHeight - mScrollOffsetY);
       mHeight += 14;
    }
+   ofResetClipWindow();
 
    static int sScreenshotDelay = 0;
    if (sScreenshotDelay <= 0)
@@ -120,8 +124,7 @@ void HelpDisplay::DrawModule()
          std::string typeName = mScreenshotModule->GetTypeName();
          if (!mScreenshotsToProcess.empty())
          {
-            typeName = *mScreenshotsToProcess.begin();
-            ofStringReplace(typeName, " " + std::string(ModuleFactory::kEffectChainSuffix), "");   //strip this suffix if it's there
+            typeName = mScreenshotsToProcess.begin()->mLabel;
             mScreenshotsToProcess.pop_front();
          }
 
@@ -140,8 +143,8 @@ void HelpDisplay::DrawModule()
       {
          mScreenshotModule = TheSynth->SpawnModuleOnTheFly(mScreenshotsToProcess.front(), 100, 300);
 
-         if (mScreenshotsToProcess.front() == "drumplayer")
-            mScreenshotModule->FindUIControl("edit")->SetValue(1);
+         if (mScreenshotsToProcess.front().mLabel == "drumplayer")
+            mScreenshotModule->FindUIControl("edit")->SetValue(1, gTime);
 
          sScreenshotDelay = 10;
       }
@@ -150,6 +153,12 @@ void HelpDisplay::DrawModule()
    {
       --sScreenshotDelay;
    }
+}
+
+bool HelpDisplay::MouseScrolled(float x, float y, float scrollX, float scrollY, bool isSmoothScroll, bool isInvertedScroll)
+{
+   mScrollOffsetY = ofClamp(mScrollOffsetY - scrollY * 10, 0, mMaxScrollAmount);
+   return true;
 }
 
 void HelpDisplay::GetModuleDimensions(float& w, float& h)
@@ -166,11 +175,11 @@ void HelpDisplay::GetModuleDimensions(float& w, float& h)
    }
 }
 
-void HelpDisplay::CheckboxUpdated(Checkbox* checkbox)
+void HelpDisplay::CheckboxUpdated(Checkbox* checkbox, double time)
 {
    if (checkbox == mShowTooltipsCheckbox)
    {
-      if (sShowTooltips)// && !mTooltipsLoaded)
+      if (sShowTooltips) // && !mTooltipsLoaded)
          LoadTooltips();
    }
 }
@@ -188,7 +197,7 @@ void HelpDisplay::LoadTooltips()
       juce::StringArray lines;
       tooltipsFile.readLines(lines);
 
-      for (int i=0; i<lines.size(); ++i)
+      for (int i = 0; i < lines.size(); ++i)
       {
          if (lines[i].isNotEmpty())
          {
@@ -251,7 +260,7 @@ namespace
 
       // lookup table for storing results of
       // subproblems
-      std::vector<std::vector<bool>> lookup(n+1, std::vector<bool>(m+1));
+      std::vector<std::vector<bool>> lookup(n + 1, std::vector<bool>(m + 1));
 
       // empty pattern can match with empty string
       lookup[0][0] = true;
@@ -262,8 +271,10 @@ namespace
             lookup[0][j] = lookup[0][j - 1];
 
       // fill the table in bottom-up fashion
-      for (int i = 1; i <= n; i++) {
-         for (int j = 1; j <= m; j++) {
+      for (int i = 1; i <= n; i++)
+      {
+         for (int j = 1; j <= m; j++)
+         {
             // Two cases if we see a '*'
             // a) We ignore ‘*’ character and move
             //    to next  character in the pattern,
@@ -271,8 +282,7 @@ namespace
             // b) '*' character matches with ith
             //     character in input
             if (pattern[j - 1] == '*')
-               lookup[i][j]
-               = lookup[i][j - 1] || lookup[i - 1][j];
+               lookup[i][j] = lookup[i][j - 1] || lookup[i - 1][j];
 
             else if (target[i - 1] == pattern[j - 1])
                lookup[i][j] = lookup[i - 1][j - 1];
@@ -338,7 +348,7 @@ std::string HelpDisplay::GetModuleTooltip(IDrawableModule* module)
 {
    if (module == TheTitleBar)
       return "";
-   
+
    return GetModuleTooltipFromName(module->GetTypeName());
 }
 
@@ -355,7 +365,7 @@ std::string HelpDisplay::GetModuleTooltipFromName(std::string moduleTypeName)
    return moduleTypeName + ": " + tooltip;
 }
 
-void HelpDisplay::ButtonClicked(ClickButton* button)
+void HelpDisplay::ButtonClicked(ClickButton* button, double time)
 {
    if (button == mTutorialVideoLinkButton)
    {
@@ -369,24 +379,28 @@ void HelpDisplay::ButtonClicked(ClickButton* button)
    {
       juce::URL("https://discord.gg/YdTMkvvpZZ").launchInDefaultBrowser();
    }
+   if (button == mCopyBuildInfoButton)
+   {
+      juce::SystemClipboard::copyTextToClipboard("bespoke " + juce::String(GetBuildInfoString()) + " - " + juce::SystemStats::getOperatingSystemName() + " - " + Bespoke::GIT_BRANCH + " " + Bespoke::GIT_HASH);
+   }
    if (button == mDumpModuleInfoButton)
    {
       LoadTooltips();
 
-      std::vector<ModuleType> moduleTypes = {
-                                          kModuleType_Note,
-                                          kModuleType_Synth,
-                                          kModuleType_Audio,
-                                          kModuleType_Instrument,
-                                          kModuleType_Processor,
-                                          kModuleType_Modulator,
-                                          kModuleType_Pulse,
-                                          kModuleType_Other
-                                       };
+      std::vector<ModuleCategory> moduleTypes = {
+         kModuleCategory_Note,
+         kModuleCategory_Synth,
+         kModuleCategory_Audio,
+         kModuleCategory_Instrument,
+         kModuleCategory_Processor,
+         kModuleCategory_Modulator,
+         kModuleCategory_Pulse,
+         kModuleCategory_Other
+      };
       for (auto type : moduleTypes)
       {
-         const auto& spawnable = TheSynth->GetModuleFactory()->GetSpawnableModules(type);
-         for (auto toSpawn : spawnable)
+         const auto& modules = TheSynth->GetModuleFactory()->GetSpawnableModules(type);
+         for (auto toSpawn : modules)
             TheSynth->SpawnModuleOnTheFly(toSpawn, 0, 0);
       }
 
@@ -403,7 +417,7 @@ void HelpDisplay::ButtonClicked(ClickButton* button)
             for (std::string effect : effects)
                effectChain->AddEffect(effect);
          }
-         
+
          std::vector<IDrawableModule*> toDump;
          toDump.push_back(topLevelModule);
          for (auto* child : topLevelModule->GetChildren())
@@ -415,22 +429,22 @@ void HelpDisplay::ButtonClicked(ClickButton* button)
             if (ListContains(module->GetTypeName(), addedModuleNames) || module->GetTypeName().length() == 0)
                continue;
             addedModuleNames.push_back(module->GetTypeName());
-            
+
             std::string moduleTooltip = "[no tooltip]";
             ModuleTooltipInfo* moduleInfo = FindModuleInfo(module->GetTypeName());
             if (moduleInfo)
             {
                moduleTooltip = moduleInfo->tooltip;
-               ofStringReplace(moduleTooltip,"\n","\\n");
+               ofStringReplace(moduleTooltip, "\n", "\\n");
             }
-            output += "\n\n\n" + module->GetTypeName() + "~"+moduleTooltip+"\n";
+            output += "\n\n\n" + module->GetTypeName() + "~" + moduleTooltip + "\n";
             std::vector<IUIControl*> controls = module->GetUIControls();
             std::list<std::string> addedControlNames;
             for (auto* control : controls)
             {
                if (control->GetParent() != module && VectorContains(dynamic_cast<IDrawableModule*>(control->GetParent()), toDump))
-                  continue;   //we'll print this control's info when we are printing for the specific parent module
-               
+                  continue; //we'll print this control's info when we are printing for the specific parent module
+
                std::string controlName = control->Name();
                if (controlName != "enabled")
                {
@@ -440,11 +454,11 @@ void HelpDisplay::ButtonClicked(ClickButton* button)
                   {
                      controlName = controlInfo->controlName;
                      controlTooltip = controlInfo->tooltip;
-                     ofStringReplace(controlTooltip,"\n","\\n");
+                     ofStringReplace(controlTooltip, "\n", "\\n");
                   }
                   if (!ListContains(controlName, addedControlNames))
                   {
-                     output += "~" + controlName + "~"+controlTooltip+"\n";
+                     output += "~" + controlName + "~" + controlTooltip + "\n";
                      addedControlNames.push_back(controlName);
                   }
                }
@@ -461,25 +475,30 @@ void HelpDisplay::ButtonClicked(ClickButton* button)
       mScreenshotsToProcess.push_back("drumplayer");
       mScreenshotsToProcess.push_back("notesequencer");*/
 
-      std::vector<ModuleType> moduleTypes = {
-                                          kModuleType_Note,
-                                          kModuleType_Synth,
-                                          kModuleType_Audio,
-                                          kModuleType_Instrument,
-                                          kModuleType_Processor,
-                                          kModuleType_Modulator,
-                                          kModuleType_Pulse,
-                                          kModuleType_Other
+      std::vector<ModuleCategory> moduleTypes = {
+         kModuleCategory_Note,
+         kModuleCategory_Synth,
+         kModuleCategory_Audio,
+         kModuleCategory_Instrument,
+         kModuleCategory_Processor,
+         kModuleCategory_Modulator,
+         kModuleCategory_Pulse,
+         kModuleCategory_Other
       };
       for (auto type : moduleTypes)
       {
-         const auto& spawnable = TheSynth->GetModuleFactory()->GetSpawnableModules(type);
-         for (auto toSpawn : spawnable)
+         const auto& modules = TheSynth->GetModuleFactory()->GetSpawnableModules(type);
+         for (auto toSpawn : modules)
             mScreenshotsToProcess.push_back(toSpawn);
       }
 
       for (auto effect : TheSynth->GetEffectFactory()->GetSpawnableEffects())
-         mScreenshotsToProcess.push_back(effect + " " + ModuleFactory::kEffectChainSuffix);
+      {
+         ModuleFactory::Spawnable spawnable;
+         spawnable.mLabel = effect;
+         spawnable.mSpawnMethod = ModuleFactory::SpawnMethod::EffectChain;
+         mScreenshotsToProcess.push_back(spawnable);
+      }
    }
    if (button == mDoModuleDocumentationButton)
    {
@@ -504,41 +523,41 @@ void HelpDisplay::ButtonClicked(ClickButton* button)
          docs[moduleType.module]["canReceivePulses"] = false;
       }
 
-      std::vector<ModuleType> moduleTypes = {
-                                          kModuleType_Note,
-                                          kModuleType_Synth,
-                                          kModuleType_Audio,
-                                          kModuleType_Instrument,
-                                          kModuleType_Processor,
-                                          kModuleType_Modulator,
-                                          kModuleType_Pulse,
-                                          kModuleType_Other
+      std::vector<ModuleCategory> moduleCategories = {
+         kModuleCategory_Note,
+         kModuleCategory_Synth,
+         kModuleCategory_Audio,
+         kModuleCategory_Instrument,
+         kModuleCategory_Processor,
+         kModuleCategory_Modulator,
+         kModuleCategory_Pulse,
+         kModuleCategory_Other
       };
-      for (auto type : moduleTypes)
+      for (auto category : moduleCategories)
       {
-         const auto& spawnable = TheSynth->GetModuleFactory()->GetSpawnableModules(type);
-         for (auto toSpawn : spawnable)
+         const auto& modules = TheSynth->GetModuleFactory()->GetSpawnableModules(category);
+         for (auto toSpawn : modules)
          {
             IDrawableModule* module = TheSynth->SpawnModuleOnTheFly(toSpawn, 100, 300);
 
             std::string moduleType;
-            switch (module->GetModuleType())
+            switch (module->GetModuleCategory())
             {
-               case kModuleType_Note: moduleType = "note effects"; break;
-               case kModuleType_Synth: moduleType = "synths"; break;
-               case kModuleType_Audio: moduleType = "audio effects"; break;
-               case kModuleType_Instrument: moduleType = "instruments"; break;
-               case kModuleType_Processor: moduleType = "effect chain"; break;
-               case kModuleType_Modulator: moduleType = "modulators"; break;
-               case kModuleType_Pulse: moduleType = "pulse"; break;
-               case kModuleType_Other: moduleType = "other"; break;
-               case kModuleType_Unknown: moduleType = "unknown"; break;
+               case kModuleCategory_Note: moduleType = "note effects"; break;
+               case kModuleCategory_Synth: moduleType = "synths"; break;
+               case kModuleCategory_Audio: moduleType = "audio effects"; break;
+               case kModuleCategory_Instrument: moduleType = "instruments"; break;
+               case kModuleCategory_Processor: moduleType = "effect chain"; break;
+               case kModuleCategory_Modulator: moduleType = "modulators"; break;
+               case kModuleCategory_Pulse: moduleType = "pulse"; break;
+               case kModuleCategory_Other: moduleType = "other"; break;
+               case kModuleCategory_Unknown: moduleType = "unknown"; break;
             }
 
-            docs[toSpawn]["type"] = moduleType;
-            docs[toSpawn]["canReceiveAudio"] = module->CanReceiveAudio();
-            docs[toSpawn]["canReceiveNote"] = module->CanReceiveNotes();
-            docs[toSpawn]["canReceivePulses"] = module->CanReceivePulses();
+            docs[toSpawn.mLabel]["type"] = moduleType;
+            docs[toSpawn.mLabel]["canReceiveAudio"] = module->CanReceiveAudio();
+            docs[toSpawn.mLabel]["canReceiveNote"] = module->CanReceiveNotes();
+            docs[toSpawn.mLabel]["canReceivePulses"] = module->CanReceivePulses();
 
             module->GetOwningContainer()->DeleteModule(module);
          }
@@ -569,8 +588,8 @@ void HelpDisplay::RenderScreenshot(int x, int y, int width, int height, std::str
    juce::gl::glReadBuffer(juce::gl::GL_BACK);
    int oldAlignment;
    juce::gl::glGetIntegerv(juce::gl::GL_PACK_ALIGNMENT, &oldAlignment);
-   juce::gl::glPixelStorei(juce::gl::GL_PACK_ALIGNMENT, 1);   //tight packing
-   juce::gl::glReadPixels(x, ofGetHeight()*scale-y-height, width, height, juce::gl::GL_RGB, juce::gl::GL_UNSIGNED_BYTE, pixels);
+   juce::gl::glPixelStorei(juce::gl::GL_PACK_ALIGNMENT, 1); //tight packing
+   juce::gl::glReadPixels(x, ofGetHeight() * scale - y - height, width, height, juce::gl::GL_RGB, juce::gl::GL_UNSIGNED_BYTE, pixels);
    juce::gl::glPixelStorei(juce::gl::GL_PACK_ALIGNMENT, oldAlignment);
 
    juce::Image image(juce::Image::RGB, width, height, true);
@@ -585,7 +604,7 @@ void HelpDisplay::RenderScreenshot(int x, int y, int width, int height, std::str
 
    {
       juce::File(ofToDataPath("screenshots")).createDirectory();
-      juce::File pngFile(ofToDataPath("screenshots/"+filename));
+      juce::File pngFile(ofToDataPath("screenshots/" + filename));
       if (pngFile.existsAsFile())
          pngFile.deleteFile();
       juce::FileOutputStream stream(pngFile);

@@ -48,7 +48,7 @@ void NoteSorter::CreateUIControls()
       TEXTENTRY_NUM(mPitchEntry[i], ("pitch " + ofToString(i)).c_str(), 4, &mPitch[i], -1, 127);
       mDestinationCables[i] = new AdditionalNoteCable();
       mDestinationCables[i]->SetPatchCableSource(new PatchCableSource(this, kConnectionType_Note));
-      mDestinationCables[i]->GetPatchCableSource()->SetOverrideCableDir(ofVec2f(1, 0));
+      mDestinationCables[i]->GetPatchCableSource()->SetOverrideCableDir(ofVec2f(1, 0), PatchCableSource::Side::kRight);
       AddPatchCableSource(mDestinationCables[i]->GetPatchCableSource());
       ofRectangle rect = mPitchEntry[i]->GetRect(true);
       mDestinationCables[i]->GetPatchCableSource()->SetManualPosition(rect.getMaxX() + 10, rect.y + rect.height / 2);
@@ -95,9 +95,9 @@ void NoteSorter::LoadLayout(const ofxJSONElement& moduleInfo)
 
 void NoteSorter::TextEntryComplete(TextEntry* entry)
 {
-   mNoteOutput.Flush(gTime + gBufferSizeMs);
+   mNoteOutput.Flush(NextBufferTime(false));
    for (int i = 0; i < kMaxDestinations; ++i)
-      mDestinationCables[i]->Flush(gTime + gBufferSizeMs);
+      mDestinationCables[i]->Flush(NextBufferTime(false));
 }
 
 void NoteSorter::SetUpFromSaveData()
@@ -106,5 +106,4 @@ void NoteSorter::SetUpFromSaveData()
 
 void NoteSorter::SaveLayout(ofxJSONElement& moduleInfo)
 {
-   IDrawableModule::SaveLayout(moduleInfo);
 }

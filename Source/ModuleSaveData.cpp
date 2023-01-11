@@ -24,6 +24,7 @@
 //
 
 #include "ModuleSaveData.h"
+#include "ModularSynth.h"
 #include "ofxJSONElement.h"
 #include "SynthGlobals.h"
 #include "DropdownList.h"
@@ -32,7 +33,6 @@
 
 ModuleSaveData::ModuleSaveData()
 {
-
 }
 
 ModuleSaveData::~ModuleSaveData()
@@ -48,7 +48,7 @@ ModuleSaveData::SaveVal* ModuleSaveData::GetVal(std::string prop)
       if ((*iter)->mProperty == prop)
          return *iter;
    }
-   
+
    //didn't find it, add
    ModuleSaveData::SaveVal* newVal = new ModuleSaveData::SaveVal(prop);
    mValues.push_back(newVal);
@@ -57,7 +57,7 @@ ModuleSaveData::SaveVal* ModuleSaveData::GetVal(std::string prop)
 
 void ModuleSaveData::Save(ofxJSONElement& moduleInfo)
 {
-   for (auto i=mValues.begin(); i!=mValues.end(); ++i)
+   for (auto i = mValues.begin(); i != mValues.end(); ++i)
    {
       const SaveVal* save = *i;
       assert(save);
@@ -141,7 +141,7 @@ void ModuleSaveData::SetExtents(std::string prop, float min, float max)
 
 bool ModuleSaveData::HasProperty(std::string prop)
 {
-   for (auto i=mValues.begin(); i!=mValues.end(); ++i)
+   for (auto i = mValues.begin(); i != mValues.end(); ++i)
    {
       if ((*i)->mProperty == prop)
          return true;
@@ -191,6 +191,7 @@ int ModuleSaveData::LoadInt(std::string prop, const ofxJSONElement& moduleInfo, 
    }
    catch (Json::LogicError& e)
    {
+      TheSynth->LogEvent(__PRETTY_FUNCTION__ + std::string(" json error: ") + e.what(), kLogEventType_Error);
    }
    SetInt(prop, val, min, max, isTextField);
    return val;
@@ -198,8 +199,8 @@ int ModuleSaveData::LoadInt(std::string prop, const ofxJSONElement& moduleInfo, 
 
 int ModuleSaveData::LoadInt(std::string prop, const ofxJSONElement& moduleInfo, int defaultValue, IntSlider* slider, bool isTextField)
 {
-   int min=0;
-   int max=10;
+   int min = 0;
+   int max = 10;
    if (slider)
       slider->GetRange(min, max);
    return LoadInt(prop, moduleInfo, defaultValue, min, max, isTextField);
@@ -215,6 +216,7 @@ float ModuleSaveData::LoadFloat(std::string prop, const ofxJSONElement& moduleIn
    }
    catch (Json::LogicError& e)
    {
+      TheSynth->LogEvent(__PRETTY_FUNCTION__ + std::string(" json error: ") + e.what(), kLogEventType_Error);
    }
    SetFloat(prop, val, min, max, isTextField);
    return val;
@@ -222,8 +224,8 @@ float ModuleSaveData::LoadFloat(std::string prop, const ofxJSONElement& moduleIn
 
 float ModuleSaveData::LoadFloat(std::string prop, const ofxJSONElement& moduleInfo, float defaultValue, FloatSlider* slider, bool isTextField)
 {
-   float min=0;
-   float max=1;
+   float min = 0;
+   float max = 1;
    if (slider)
       slider->GetRange(min, max);
    return LoadFloat(prop, moduleInfo, defaultValue, min, max, isTextField);
@@ -239,6 +241,7 @@ bool ModuleSaveData::LoadBool(std::string prop, const ofxJSONElement& moduleInfo
    }
    catch (Json::LogicError& e)
    {
+      TheSynth->LogEvent(__PRETTY_FUNCTION__ + std::string(" json error: ") + e.what(), kLogEventType_Error);
    }
    SetBool(prop, val);
    return val;
@@ -254,6 +257,7 @@ std::string ModuleSaveData::LoadString(std::string prop, const ofxJSONElement& m
    }
    catch (Json::LogicError& e)
    {
+      TheSynth->LogEvent(__PRETTY_FUNCTION__ + std::string(" json error: ") + e.what(), kLogEventType_Error);
    }
    SetString(prop, val);
    SaveVal* save = GetVal(prop);

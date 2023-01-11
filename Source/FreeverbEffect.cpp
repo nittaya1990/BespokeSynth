@@ -29,27 +29,14 @@
 #include "Profiler.h"
 
 FreeverbEffect::FreeverbEffect()
-: mRoomSizeSlider(nullptr)
-, mDampSlider(nullptr)
-, mWetSlider(nullptr)
-, mDrySlider(nullptr)
-, mWidthSlider(nullptr)
-, mNeedUpdate(false)
 {
    //mFreeverb.setmode(GetParameter(KMode));
-   //mFreeverb.setroomsize(GetParameter(KRoomSize));
-   mFreeverb.setdamp(50);
-   mFreeverb.setwet(.5f);
-   mFreeverb.setdry(1);
-   //mFreeverb.setwidth(GetParameter(KWidth));
+   mFreeverb.setroomsize(mRoomSize);
+   mFreeverb.setdamp(mDamp);
+   mFreeverb.setwet(mWet);
+   mFreeverb.setdry(mDry);
+   mFreeverb.setwidth(mVerbWidth);
    mFreeverb.update();
-   
-   mFreeze = false;
-   mRoomSize = mFreeverb.getroomsize();
-   mDamp = mFreeverb.getdamp();
-   mWet = mFreeverb.getwet();
-   mDry = mFreeverb.getdry();
-   mVerbWidth = mFreeverb.getwidth();
 }
 
 FreeverbEffect::~FreeverbEffect()
@@ -59,34 +46,34 @@ FreeverbEffect::~FreeverbEffect()
 void FreeverbEffect::CreateUIControls()
 {
    IDrawableModule::CreateUIControls();
-   mRoomSizeSlider = new FloatSlider(this,"room size",5,4,85,15,&mRoomSize,.1f,.99f,2);
-   mDampSlider = new FloatSlider(this,"damp",5,20,85,15,&mDamp,0,100);
-   mWetSlider = new FloatSlider(this,"wet",5,36,85,15,&mWet,0,1);
-   mDrySlider = new FloatSlider(this,"dry",5,52,85,15,&mDry,0,1);
-   mWidthSlider = new FloatSlider(this,"width",5,68,85,15,&mVerbWidth,0,1);
+   mRoomSizeSlider = new FloatSlider(this, "room size", 5, 4, 85, 15, &mRoomSize, .1f, .99f, 2);
+   mDampSlider = new FloatSlider(this, "damp", 5, 20, 85, 15, &mDamp, 0, 100);
+   mWetSlider = new FloatSlider(this, "wet", 5, 36, 85, 15, &mWet, 0, 1);
+   mDrySlider = new FloatSlider(this, "dry", 5, 52, 85, 15, &mDry, 0, 1);
+   mWidthSlider = new FloatSlider(this, "width", 5, 68, 85, 15, &mVerbWidth, 0, 100);
 }
 
 void FreeverbEffect::ProcessAudio(double time, ChannelBuffer* buffer)
 {
    PROFILER(FreeverbEffect);
-   
+
    if (!mEnabled)
       return;
-   
+
    float bufferSize = buffer->BufferSize();
-   
+
    ComputeSliders(0);
-   
+
    if (mNeedUpdate)
    {
       mFreeverb.update();
       mNeedUpdate = false;
    }
-   
+
    int secondChannel = 1;
    if (buffer->NumActiveChannels() <= 1)
       secondChannel = 0;
-   
+
    mFreeverb.processreplace(buffer->GetChannel(0), buffer->GetChannel(secondChannel), buffer->GetChannel(0), buffer->GetChannel(secondChannel), bufferSize, 1);
 }
 
@@ -94,7 +81,7 @@ void FreeverbEffect::DrawModule()
 {
    if (!mEnabled)
       return;
-   
+
    mRoomSizeSlider->Draw();
    mDampSlider->Draw();
    mWetSlider->Draw();
@@ -123,11 +110,11 @@ float FreeverbEffect::GetEffectAmount()
    return mWet;
 }
 
-void FreeverbEffect::CheckboxUpdated(Checkbox* checkbox)
+void FreeverbEffect::CheckboxUpdated(Checkbox* checkbox, double time)
 {
 }
 
-void FreeverbEffect::FloatSliderUpdated(FloatSlider* slider, float oldVal)
+void FreeverbEffect::FloatSliderUpdated(FloatSlider* slider, float oldVal, double time)
 {
    if (slider == mRoomSizeSlider)
    {
@@ -155,4 +142,3 @@ void FreeverbEffect::FloatSliderUpdated(FloatSlider* slider, float oldVal)
       mNeedUpdate = true;
    }
 }
-

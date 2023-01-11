@@ -44,14 +44,15 @@ public:
    void CreateBuffer();
    void FillBuffer(float* buffer);
    float GetBufferValue(int sampleIdx);
+
 private:
    Ramp mRamp;
    LFO mLFO;
-   float mLFOAmount;
-   float* mBuffer;
-   ModulationChain* mPrev;
-   ModulationChain* mSidechain;
-   ModulationChain* mMultiplyIn;
+   float mLFOAmount{ 0 };
+   float* mBuffer{ nullptr };
+   ModulationChain* mPrev{ nullptr };
+   ModulationChain* mSidechain{ nullptr };
+   ModulationChain* mMultiplyIn{ nullptr };
 };
 
 struct ModulationCollection
@@ -67,20 +68,26 @@ struct ModulationParameters
    ModulationParameters(ModulationChain* _pitchBend,
                         ModulationChain* _modWheel,
                         ModulationChain* _pressure,
-                        float _pan) : pitchBend(_pitchBend), modWheel(_modWheel), pressure(_pressure), pan(_pan) {}
-   ModulationChain* pitchBend = nullptr;
-   ModulationChain* modWheel = nullptr;
-   ModulationChain* pressure = nullptr;
-   float pan = 0;
+                        float _pan)
+   : pitchBend(_pitchBend)
+   , modWheel(_modWheel)
+   , pressure(_pressure)
+   , pan(_pan)
+   {}
+   ModulationChain* pitchBend{ nullptr };
+   ModulationChain* modWheel{ nullptr };
+   ModulationChain* pressure{ nullptr };
+   float pan{ 0 };
 };
 
 class Modulations
 {
 public:
-   Modulations(bool isGlobalEffect);   //isGlobalEffect: is the effect that we're using this on a global effect that affects all voices (pitch bend all voices that come through here the same way) or a voice effect (affect individual voices that come through here individually)?
+   Modulations(bool isGlobalEffect); //isGlobalEffect: is the effect that we're using this on a global effect that affects all voices (pitch bend all voices that come through here the same way) or a voice effect (affect individual voices that come through here individually)?
    ModulationChain* GetPitchBend(int voiceIdx);
    ModulationChain* GetModWheel(int voiceIdx);
    ModulationChain* GetPressure(int voiceIdx);
+
 private:
    ModulationCollection mGlobalModulation;
    std::vector<ModulationCollection> mVoiceModulations;

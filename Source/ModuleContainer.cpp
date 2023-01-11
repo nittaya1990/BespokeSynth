@@ -34,17 +34,12 @@
 #include "PerformanceTimer.h"
 #include "SynthGlobals.h"
 #include "QuickSpawnMenu.h"
+#include "Prefab.h"
 
 #include "juce_core/juce_core.h"
 
-//static
-int ModuleContainer::sFileSaveStateRev = -1;
-
 ModuleContainer::ModuleContainer()
-: mOwner(nullptr)
-, mDrawScale(1)
 {
-   
 }
 
 ofVec2f ModuleContainer::GetOwnerPosition() const
@@ -57,7 +52,7 @@ ofVec2f ModuleContainer::GetOwnerPosition() const
 void ModuleContainer::GetAllModules(std::vector<IDrawableModule*>& out)
 {
    out.insert(out.begin(), mModules.begin(), mModules.end());
-   for (int i=0; i<mModules.size(); ++i)
+   for (int i = 0; i < mModules.size(); ++i)
    {
       if (mModules[i]->GetContainer())
          mModules[i]->GetContainer()->GetAllModules(out);
@@ -66,13 +61,13 @@ void ModuleContainer::GetAllModules(std::vector<IDrawableModule*>& out)
 
 void ModuleContainer::Draw()
 {
-   for (int i = (int)mModules.size()-1; i >= 0; --i)
+   for (int i = (int)mModules.size() - 1; i >= 0; --i)
    {
       if (!mModules[i]->AlwaysOnTop())
          mModules[i]->Draw();
    }
-   
-   for (int i = (int)mModules.size()-1; i >= 0; --i)
+
+   for (int i = (int)mModules.size() - 1; i >= 0; --i)
    {
       if (mModules[i]->AlwaysOnTop())
          mModules[i]->Draw();
@@ -96,7 +91,7 @@ void ModuleContainer::DrawUnclipped()
 
 void ModuleContainer::PostRender()
 {
-   for (int i = (int)mModules.size()-1; i >= 0; --i)
+   for (int i = (int)mModules.size() - 1; i >= 0; --i)
       mModules[i]->PostRender();
 }
 
@@ -104,8 +99,8 @@ void ModuleContainer::DrawPatchCables(bool parentMinimized)
 {
    if (mOwner != nullptr && mOwner->Minimized())
       parentMinimized = true;
-   
-   for (int i = (int)mModules.size()-1; i >= 0; --i)
+
+   for (int i = (int)mModules.size() - 1; i >= 0; --i)
    {
       mModules[i]->DrawPatchCables(parentMinimized);
       if (mModules[i]->GetContainer())
@@ -115,9 +110,10 @@ void ModuleContainer::DrawPatchCables(bool parentMinimized)
 
 void ModuleContainer::Poll()
 {
-   if (mOwner != nullptr) return;
-   
-   for (int i=0; i<mModules.size(); ++i)
+   if (mOwner != nullptr)
+      return;
+
+   for (int i = 0; i < mModules.size(); ++i)
    {
       if (mModules[i]->GetContainer())
          mModules[i]->GetContainer()->Poll();
@@ -130,17 +126,20 @@ void ModuleContainer::Clear()
    std::vector<IDrawableModule*> modulesToDelete = mModules;
    for (auto* module : modulesToDelete)
    {
-      if (module->GetContainer())
-         module->GetContainer()->Clear();
-      if (module->IsSingleton() == false)
-         DeleteModule(module);
+      if (module)
+      {
+         if (module->GetContainer())
+            module->GetContainer()->Clear();
+         if (module->IsSingleton() == false)
+            DeleteModule(module);
+      }
    }
    mModules.clear();
 }
 
 void ModuleContainer::Exit()
 {
-   for (int i=0; i<mModules.size(); ++i)
+   for (int i = 0; i < mModules.size(); ++i)
    {
       if (mModules[i]->GetContainer())
          mModules[i]->GetContainer()->Exit();
@@ -150,7 +149,7 @@ void ModuleContainer::Exit()
 
 void ModuleContainer::KeyPressed(int key, bool isRepeat)
 {
-   for (int i=0; i<mModules.size(); ++i)
+   for (int i = 0; i < mModules.size(); ++i)
    {
       if (mModules[i]->GetContainer())
          mModules[i]->GetContainer()->KeyPressed(key, isRepeat);
@@ -160,7 +159,7 @@ void ModuleContainer::KeyPressed(int key, bool isRepeat)
 
 void ModuleContainer::KeyReleased(int key)
 {
-   for (int i=0; i<mModules.size(); ++i)
+   for (int i = 0; i < mModules.size(); ++i)
    {
       if (mModules[i]->GetContainer())
          mModules[i]->GetContainer()->KeyReleased(key);
@@ -170,23 +169,25 @@ void ModuleContainer::KeyReleased(int key)
 
 void ModuleContainer::MouseMoved(float x, float y)
 {
-   if (mOwner != nullptr) return;
-   
-   for (int i=(int)mModules.size()-1; i>=0; --i)  //run this backwards so that we can figure out the top hover control
+   if (mOwner != nullptr)
+      return;
+
+   for (int i = (int)mModules.size() - 1; i >= 0; --i) //run this backwards so that we can figure out the top hover control
    {
       ModuleContainer* subcontainer = mModules[i]->GetContainer();
       if (subcontainer)
       {
          subcontainer->MouseMoved(x - subcontainer->GetOwnerPosition().x, y - subcontainer->GetOwnerPosition().y);
       }
-      mModules[i]->NotifyMouseMoved(x,y);
+      mModules[i]->NotifyMouseMoved(x, y);
    }
 }
 
 void ModuleContainer::MouseReleased()
 {
-   if (mOwner != nullptr) return;
-   
+   if (mOwner != nullptr)
+      return;
+
    for (int i = 0; i < mModules.size(); i++)
    {
       ModuleContainer* subcontainer = mModules[i]->GetContainer();
@@ -205,17 +206,17 @@ IDrawableModule* ModuleContainer::GetModuleAt(float x, float y)
       x -= ownerX;
       y -= ownerY;
    }
-   
+
    const auto& modalItems = TheSynth->GetModalFocusItemStack();
-   for (int i=(int)modalItems.size()-1; i>=0; --i)
+   for (int i = (int)modalItems.size() - 1; i >= 0; --i)
    {
-      if (modalItems[i]->GetOwningContainer() == this && modalItems[i]->TestClick(x,y,false,true))
+      if (modalItems[i]->GetOwningContainer() == this && modalItems[i]->TestClick(x, y, false, true))
          return modalItems[i];
    }
-   
-   for (int i=0; i<mModules.size(); ++i)
+
+   for (int i = 0; i < mModules.size(); ++i)
    {
-      if (mModules[i]->AlwaysOnTop() && mModules[i]->TestClick(x,y,false,true))
+      if (mModules[i]->AlwaysOnTop() && mModules[i]->TestClick(x, y, false, true))
       {
          ModuleContainer* subcontainer = mModules[i]->GetContainer();
          if (subcontainer)
@@ -229,9 +230,9 @@ IDrawableModule* ModuleContainer::GetModuleAt(float x, float y)
          return mModules[i];
       }
    }
-   for (int i=0; i<mModules.size(); ++i)
+   for (int i = 0; i < mModules.size(); ++i)
    {
-      if (!mModules[i]->AlwaysOnTop() && mModules[i]->TestClick(x,y,false,true))
+      if (!mModules[i]->AlwaysOnTop() && mModules[i]->TestClick(x, y, false, true))
       {
          ModuleContainer* subcontainer = mModules[i]->GetContainer();
          if (subcontainer)
@@ -265,7 +266,7 @@ float ModuleContainer::GetDrawScale() const
 void ModuleContainer::GetModulesWithinRect(ofRectangle rect, std::vector<IDrawableModule*>& output)
 {
    output.clear();
-   for (int i=0; i<mModules.size(); ++i)
+   for (int i = 0; i < mModules.size(); ++i)
    {
       if (mModules[i]->IsWithinRect(rect) && mModules[i] != TheQuickSpawnMenu && mModules[i]->IsShowing())
          output.push_back(mModules[i]);
@@ -276,15 +277,15 @@ void ModuleContainer::MoveToFront(IDrawableModule* module)
 {
    if (mOwner && mOwner->GetOwningContainer() != nullptr)
       mOwner->GetOwningContainer()->MoveToFront(mOwner);
-   
-   for (int i=0; i<mModules.size(); ++i)
+
+   for (int i = 0; i < mModules.size(); ++i)
    {
       if (mModules[i] == module)
       {
-         for (int j=i; j>0; --j)
-            mModules[j] = mModules[j-1];
+         for (int j = i; j > 0; --j)
+            mModules[j] = mModules[j - 1];
          mModules[0] = module;
-         
+
          break;
       }
    }
@@ -307,37 +308,38 @@ void ModuleContainer::TakeModule(IDrawableModule* module)
    if (module->GetOwningContainer()->mOwner)
       module->GetOwningContainer()->mOwner->RemoveChild(module);
    RemoveFromVector(module, module->GetOwningContainer()->mModules);
-   
+
+   std::string newName = GetUniqueName(module->Name(), mModules);
+
    mModules.push_back(module);
    MoveToFront(module);
-   
+
    ofVec2f offset = oldOwnerPos - GetOwnerPosition();
    module->SetPosition(module->GetPosition(true).x + offset.x,
                        module->GetPosition(true).y + offset.y);
    module->SetOwningContainer(this);
    if (mOwner)
-   {
       mOwner->AddChild(module);
-   }
-   else   //root modulecontainer
-   {
-      module->SetName(GetUniqueName(module->Name(), mModules).c_str());
-   }
+   else //root modulecontainer
+      module->SetName(newName.c_str());
 }
 
-void ModuleContainer::DeleteModule(IDrawableModule* module)
+void ModuleContainer::DeleteModule(IDrawableModule* module, bool fail /*= true*/)
 {
    if (!module->CanBeDeleted())
       return;
-   
+
    if (module->HasSpecialDelete())
    {
       module->DoSpecialDelete();
-      RemoveFromVector(module, mModules, K(fail));
+      RemoveFromVector(module, mModules, fail);
       return;
    }
-   
-   RemoveFromVector(module, mModules, K(fail));
+
+   if (module->GetParent())
+      module->GetParent()->GetModuleParent()->RemoveChild(module);
+
+   RemoveFromVector(module, mModules, fail);
    for (auto iter : mModules)
    {
       if (iter->GetPatchCableSource())
@@ -349,7 +351,7 @@ void ModuleContainer::DeleteModule(IDrawableModule* module)
                cablesToDestroy.push_back(cable);
          }
          for (auto cable : cablesToDestroy)
-            cable->Destroy();
+            cable->Destroy(false);
       }
    }
 
@@ -376,11 +378,11 @@ IDrawableModule* ModuleContainer::FindModule(std::string name, bool fail)
       return nullptr;
       
    name = name.substr(ownerPath.length());*/
-   
+
    if (name == "")
       return nullptr;
-   
-   for (int i=0; i<mModules.size(); ++i)
+
+   for (int i = 0; i < mModules.size(); ++i)
    {
       if (name == mModules[i]->Name())
          return mModules[i];
@@ -389,7 +391,7 @@ IDrawableModule* ModuleContainer::FindModule(std::string name, bool fail)
       {
          if (tokens[0] == mModules[i]->Name())
          {
-            ofStringReplace(name, tokens[0]+"~", "", true);
+            ofStringReplace(name, tokens[0] + "~", "", true);
             return mModules[i]->GetContainer()->FindModule(name, fail);
          }
       }
@@ -407,7 +409,7 @@ IDrawableModule* ModuleContainer::FindModule(std::string name, bool fail)
             return child;
       }
    }
-   
+
    if (fail)
       throw UnknownModuleException(name);
    return nullptr;
@@ -422,29 +424,30 @@ IUIControl* ModuleContainer::FindUIControl(std::string path)
       return nullptr;
    
    path = path.substr(ownerPath.length());*/
-   
+
    if (path == "")
       return nullptr;
-   
-   std::vector<std::string> tokens = ofSplitString(path,"~");
-   std::string control = tokens[tokens.size()-1];
+
+   std::vector<std::string> tokens = ofSplitString(path, "~");
+   std::string control = tokens[tokens.size() - 1];
    std::string modulePath = path.substr(0, path.length() - (control.length() + 1));
    IDrawableModule* module = FindModule(modulePath, false);
-   
+
    if (module)
    {
       try
       {
+         module->OnUIControlRequested(control.c_str());
          return module->FindUIControl(control.c_str());
       }
       catch (UnknownUIControlException& e)
       {
-         TheSynth->LogEvent("Couldn't find UI control at path \""+path+"\"", kLogEventType_Error);
+         TheSynth->LogEvent("Couldn't find UI control at path \"" + path + "\"", kLogEventType_Error);
          return nullptr;
       }
    }
-   
-   TheSynth->LogEvent("Couldn't find module at path \""+modulePath+"\"", kLogEventType_Error);
+
+   TheSynth->LogEvent("Couldn't find module at path \"" + modulePath + "\"", kLogEventType_Error);
    return nullptr;
 }
 
@@ -452,7 +455,7 @@ bool ModuleContainer::IsHigherThan(IDrawableModule* checkFor, IDrawableModule* c
 {
    while (checkFor->GetParent())
       checkFor = dynamic_cast<IDrawableModule*>(checkFor->GetParent());
-   for (int i=0; i<mModules.size(); ++i)
+   for (int i = 0; i < mModules.size(); ++i)
    {
       if (checkFor == mModules[i])
          return true;
@@ -467,18 +470,18 @@ void ModuleContainer::LoadModules(const ofxJSONElement& modules)
    PerformanceTimer timer;
    {
       TimerInstance t("load", timer);
-      
+
       //two-pass loading for dependencies
-      
+
       if (mOwner)
          IClickable::SetLoadContext(mOwner);
       {
          TimerInstance t("create", timer);
-         for (int i=0; i<modules.size(); ++i)
+         for (int i = 0; i < modules.size(); ++i)
          {
             try
             {
-               TimerInstance t("create "+modules[i]["name"].asString(), timer);
+               TimerInstance t("create " + modules[i]["name"].asString(), timer);
                IDrawableModule* module = TheSynth->CreateModule(modules[i]);
                if (module != nullptr)
                {
@@ -492,14 +495,14 @@ void ModuleContainer::LoadModules(const ofxJSONElement& modules)
             }
          }
       }
-      
+
       {
          TimerInstance t("setup", timer);
-         for (int i=0; i<modules.size(); ++i)
+         for (int i = 0; i < modules.size(); ++i)
          {
             try
             {
-               TimerInstance t("setup "+modules[i]["name"].asString(), timer);
+               TimerInstance t("setup " + modules[i]["name"].asString(), timer);
                IDrawableModule* module = FindModule(modules[i]["name"].asString(), true);
                if (module != nullptr)
                {
@@ -513,21 +516,21 @@ void ModuleContainer::LoadModules(const ofxJSONElement& modules)
             }
             catch (UnknownModuleException& e)
             {
-               TheSynth->LogEvent("Couldn't find module \""+e.mSearchName+"\"", kLogEventType_Error);
+               TheSynth->LogEvent("Couldn't find module \"" + e.mSearchName + "\"", kLogEventType_Error);
             }
          }
       }
-      
+
       {
          TimerInstance t("init", timer);
-         for (int i=0; i<mModules.size(); ++i)
+         for (int i = 0; i < mModules.size(); ++i)
          {
-            TimerInstance t(std::string("init ")+mModules[i]->Name(), timer);
+            TimerInstance t(std::string("init ") + mModules[i]->Name(), timer);
             if (mModules[i]->IsSingleton() == false)
                mModules[i]->Init();
          }
       }
-      
+
       IClickable::ClearLoadContext();
    }
 }
@@ -541,64 +544,59 @@ ofxJSONElement ModuleContainer::WriteModules()
 {
    if (mOwner)
       IClickable::SetSaveContext(mOwner);
-   
-   for (auto i = mModules.begin(); i!= mModules.end(); ++i)
+
+   for (auto i = mModules.begin(); i != mModules.end(); ++i)
       UpdateTarget(*i);
-   
+
    ofxJSONElement modules;
-   
+
    std::vector<IDrawableModule*> saveModules;
-   for (int i=0; i<mModules.size(); ++i)
+   for (int i = 0; i < mModules.size(); ++i)
    {
       IDrawableModule* module = mModules[i];
       if (module->IsSaveable())
          saveModules.push_back(module);
    }
-   
+
    sort(saveModules.begin(), saveModules.end(), ModuleSorter);
-   
+
    modules.resize((unsigned int)saveModules.size());
-   
-   for (int i=0; i<saveModules.size(); ++i)
+
+   for (int i = 0; i < saveModules.size(); ++i)
    {
       ofxJSONElement moduleInfo;
-      saveModules[i]->SaveLayout(moduleInfo);
+      saveModules[i]->SaveLayoutBase(moduleInfo);
       modules[i] = moduleInfo;
    }
    IClickable::ClearSaveContext();
-   
-   return modules;
-}
 
-namespace
-{
-   const int kSaveStateRev = 422;
+   return modules;
 }
 
 void ModuleContainer::SaveState(FileStreamOut& out)
 {
-   out << kSaveStateRev;
-   
+   out << ModularSynth::kSaveStateRev;
+
    int savedModules = 0;
    for (auto* module : mModules)
    {
-      if (module != TheSaveDataPanel && module != TheTitleBar)
+      if (module->IsSaveable())
          ++savedModules;
    }
-   
+
    out << savedModules;
 
    if (mOwner)
       IClickable::SetSaveContext(mOwner);
-   
+
    for (auto* module : mModules)
    {
-      if (module != TheSaveDataPanel && module != TheTitleBar)
+      if (module->IsSaveable())
       {
          //ofLog() << "Saving " << module->Name();
          out << std::string(module->Name());
          module->SaveState(out);
-         for (int i=0; i<GetModuleSeparatorLength(); ++i)
+         for (int i = 0; i < GetModuleSeparatorLength(); ++i)
             out << GetModuleSeparator()[i];
       }
    }
@@ -608,21 +606,27 @@ void ModuleContainer::SaveState(FileStreamOut& out)
 
 void ModuleContainer::LoadState(FileStreamIn& in)
 {
+   Prefab::sLastLoadWasPrefab = Prefab::sLoadingPrefab;
+
    bool wasLoadingState = TheSynth->IsLoadingState();
    TheSynth->SetIsLoadingState(true);
-   
+
+   static int sModuleContainerLoadStack = 0;
+   ++sModuleContainerLoadStack;
+
    int header;
    in >> header;
-   assert(header <= kSaveStateRev);
-   sFileSaveStateRev = header;
-   
+   assert(header <= ModularSynth::kSaveStateRev);
+   ModularSynth::sLoadingFileSaveStateRev = header;
+   ModularSynth::sLastLoadedFileSaveStateRev = header;
+
    int savedModules;
    in >> savedModules;
 
    if (mOwner)
       IClickable::SetLoadContext(mOwner);
-   
-   for (int i=0; i<savedModules; ++i)
+
+   for (int i = 0; i < savedModules; ++i)
    {
       std::string moduleName;
       in >> moduleName;
@@ -633,9 +637,9 @@ void ModuleContainer::LoadState(FileStreamIn& in)
          if (module == nullptr)
             throw LoadStateException();
 
-         module->LoadState(in);
-         
-         for (int j=0; j<GetModuleSeparatorLength(); ++j)
+         module->LoadState(in, module->LoadModuleSaveStateRev(in));
+
+         for (int j = 0; j < GetModuleSeparatorLength(); ++j)
          {
             char separatorChar;
             in >> separatorChar;
@@ -646,7 +650,7 @@ void ModuleContainer::LoadState(FileStreamIn& in)
                ofLog() << "Read char " + ofToString(separatorChar) + " but expected " + GetModuleSeparator()[j] + "!";
                ofLog() << "Save state file position is " + ofToString(in.GetFilePosition()) + ", EoF is " + (in.Eof() ? "true" : "false");
                std::string nextFewChars = "Next 10 characters are:";
-               for (int c=0;c<10;++c)
+               for (int c = 0; c < 10; ++c)
                {
                   char ch;
                   in >> ch;
@@ -659,8 +663,8 @@ void ModuleContainer::LoadState(FileStreamIn& in)
       }
       catch (LoadStateException& e)
       {
-         TheSynth->LogEvent("Error loading state for module \""+moduleName+"\"", kLogEventType_Error);
-         
+         TheSynth->LogEvent("Error loading state for module \"" + moduleName + "\"", kLogEventType_Error);
+
          //read through the rest of the module until we find the spacer, so we can continue loading the next module
          int separatorProgress = 0;
          juce::uint64 safetyCheck = 0;
@@ -673,23 +677,28 @@ void ModuleContainer::LoadState(FileStreamIn& in)
             else
                separatorProgress = 0;
             if (separatorProgress == GetModuleSeparatorLength())
-               break;   //we did it!
+               break; //we did it!
             ++safetyCheck;
          }
       }
    }
-   
+
    for (auto module : mModules)
       module->PostLoadState();
 
    IClickable::ClearLoadContext();
    TheSynth->SetIsLoadingState(wasLoadingState);
+
+   --sModuleContainerLoadStack;
+
+   if (sModuleContainerLoadStack <= 0)
+      ModularSynth::sLoadingFileSaveStateRev = ModularSynth::kSaveStateRev; //reset to current
 }
 
 //static
 bool ModuleContainer::DoesModuleHaveMoreSaveData(FileStreamIn& in)
 {
-   char test[GetModuleSeparatorLength()+1];
+   char test[GetModuleSeparatorLength() + 1];
    in.Peek(test, GetModuleSeparatorLength());
    test[GetModuleSeparatorLength()] = 0;
    if (strcmp(GetModuleSeparator(), test) == 0)
